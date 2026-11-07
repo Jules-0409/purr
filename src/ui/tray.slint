@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: GPL-3.0-only
+import { Theme, ThemeMotion, IconClock } from "tokens.slint";
+import { Palette } from "std-widgets.slint";
+import { NativeTray } from "design/native-tray.slint";
+export { TrayNode } from "types.slint";
+import { TrayNode } from "types.slint";
+export component TrayWindow inherits Window {
+    ThemeMotion {}
+    private property <float> entrance: 0;
+    init => { root.entrance = 1; }
+    animate entrance { duration: IconClock.reduced ? 0ms : 180ms; easing: ease; }
+    title: "PURR · 托盘"; no-frame: true; always-on-top: true;
+    width: 308px; height: panel.height; background: Theme.bg;
+    out property <length> desired-height: panel.height;
+    in-out property <bool> upward: false;
+    private property <bool> os-dark: Palette.color-scheme == ColorScheme.dark;
+    changed os-dark => {Theme.dark = self.os-dark;}
+    in property <bool> first-run <=> panel.first-run;
+    in property <bool> awake <=> panel.awake;
+    in property <bool> sys-proxy <=> panel.sys-proxy;
+    in property <bool> tun-mode <=> panel.tun-mode;
+    in property <bool> tun-auth <=> panel.tun-auth;
+    in property <string> mode <=> panel.mode;
+    in property <string> subtitle <=> panel.subtitle;
+    in property <string> metrics <=> panel.metrics;
+    in property <string> down <=> panel.down;
+    in property <string> up <=> panel.up;
+    in property <string> memory <=> panel.memory;
+    in property <string> total <=> panel.total;
+    in property <string> unit <=> panel.unit;
+    in property <string> trouble <=> panel.trouble;
+    in property <string> trouble-title <=> panel.trouble-title;
+    in property <string> trouble-action <=> panel.trouble-action;
+    in property <string> countdown <=> panel.countdown;
+    in property <[TrayNode]> nodes <=> panel.nodes;
+    callback action(string,string);
+    callback select-node(string,string);
+    callback dismiss();
+    FocusScope {width: 100%; height: 100%; init => {self.focus();}
+        key-pressed(e)=>{
+            if e.text == Key.Escape {root.dismiss();return accept;}
+            if e.modifiers.control || e.modifiers.meta {
+                if e.text == "c" {root.action("copy", "");return accept;}
+                if e.text == "o" {root.action("open", "");return accept;}
+                if e.text == "q" {root.action("quit", "");return accept;}
+            }
+            return reject;
+        }
+        panel := NativeTray {x: 0px; y: 0px; action(a,b)=>{root.action(a,b);} select-node(a,b)=>{root.select-node(a,b);}}
+    }
+}

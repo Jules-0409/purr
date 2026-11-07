@@ -1,0 +1,18 @@
+import { CatSwitchFull, Knob } from "design/widgets.slint";
+import { Band } from "design/chrome.slint";
+export component SwitchCheckWindow inherits Window {
+    width: 1200px; height: 276px;
+    title: "PURR · switch check";
+    background: #FFFFFF;
+    in-out property <bool> checked;
+    out property <float> clock: animation-tick() / 1ms;
+    out property <float> knob-x: control.knob-x / 1px;
+    out property <float> knob-angle: control.knob-angle;
+    out property <float> knob-y: control.knob-y;
+    out property <float> fill-progress: control.fill-progress;
+    out property <bool> hovered: area.has-hover;
+    control := CatSwitchFull { x: 200px; y: 50px; on: root.checked; hover: area.has-hover; }
+    Knob { x: 40px; y: 50px; on: root.checked; hover: area.has-hover; }
+    Band { x: 0; y: 140px; width: root.width; }
+    area := TouchArea { x: 20px; y: 20px; width: 260px; height: 90px; clicked => { root.checked = !root.checked; } }
+}

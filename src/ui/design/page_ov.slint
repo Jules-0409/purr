@@ -1,0 +1,518 @@
+// 概览 — overview page (+ first-run welcome)
+import { T, Anim } from "theme.slint";
+import { ScrollView } from "std-widgets.slint";
+import { S, Route } from "state.slint";
+import { SiteRow } from "../types.slint";
+import { Icon } from "icons.slint";
+import { Lbl, DashBox, DashH, Field } from "widgets.slint";
+
+component VCenter inherits VerticalLayout { alignment: center; horizontal-stretch: 0; }
+
+// A big glyph laid out like an inline-block span with a tiny line-height
+component Glyph inherits Rectangle {
+    in property <string> ch;
+    in property <length> size;
+    in property <float> lh;
+    in property <length> ls;
+    width: tx.preferred-width + root.ls;
+    height: root.size * root.lh;
+    tx := Text {
+        x: 0; y: (parent.height - self.height) / 2;
+        text: root.ch; font-family: T.sans; font-weight: 900; font-size: root.size; color: T.ink;
+    }
+}
+
+// statCell / memoryCell: VStack(spacing 2 / 3) centred vertically in its 100 px row.
+component StatCell inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <string> unit;
+    in property <string> small;
+    in property <bool> border: true;
+    in property <bool> meter;
+    in property <float> pct;
+    VerticalLayout {
+        alignment: center; spacing: root.meter ? 3px : 2px;
+        Text { text: root.label; font-family: T.mono; font-size: 11px; letter-spacing: 1.6px + 11px * T.mt; color: T.mute; height: 14px; vertical-alignment: center; }
+        Rectangle { height: 33.6px;
+            vt := Text { x: 0; y: 0; height: 33px; text: root.value; font-family: T.mono; font-size: 28px; letter-spacing: 28px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: top; }
+            if root.unit != "": Text { x: vt.preferred-width + 5px; y: 17.5px; height: 15px; text: root.unit; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; font-weight: 500; color: T.mute; vertical-alignment: top; }
+        }
+        if root.meter: Rectangle { height: 6px; background: T.line;
+            Rectangle { x: 0; y: 0; height: 6px; width: parent.width * Math.min(100, root.pct) / 100; background: T.ink; }
+        }
+        Text { text: root.small; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; height: 14px; vertical-alignment: center; overflow: elide; }
+    }
+    if root.border: Rectangle { x: 0; y: parent.height - 1px; width: parent.width; height: 1px; background: T.line; }
+}
+
+// Overview "系统代理" / "虚拟网卡": HStack(spacing 7) icon 20 + 13 pt bold mono, padding 12/6,
+// corner 5, 1.5 px stroke clipped to the shape (.75 px visible), ink fill when on, 8 % on hover.
+component TakeoverBtn inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> active;
+    in property <bool> need-auth;
+    in property <bool> force-hover;
+    callback clicked;
+    property <bool> hov: ta.has-hover || root.force-hover;
+    width: tl.preferred-width;
+    height: 32px;
+    border-radius: 5px;
+    clip: true;
+    background: root.active ? T.ink : (root.hov ? T.ink.with-alpha(0.08) : transparent);
+    property <color> fg: root.active ? T.bg : T.ink;
+    tl := HorizontalLayout {
+        padding-left: 12px; padding-right: 12px;
+        spacing: 7px;
+        VCenter {
+            Icon { name: root.icon; width: 20px; height: 20px; stroke: 1.95; tint: root.fg; eyes-open: root.active; hover: root.hov; }
+        }
+        Text { text: root.label; font-family: T.mono; font-size: 13px; letter-spacing: 13px * T.mt; font-weight: 700; color: root.fg; vertical-alignment: center; }
+        if root.need-auth: Text { text: "需授权"; font-family: T.mono; font-size: 10px; letter-spacing: 10px * T.mt; font-weight: 600; color: T.mute; vertical-alignment: center; }
+    }
+    Rectangle { border-width: 0.75px; border-color: T.ink; border-radius: 5px; }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+export component ServiceDetailModal inherits Rectangle {
+    background: #14121078;
+    TouchArea { clicked => { S.service-detail-open = false; } }
+    Rectangle {
+        x: (parent.width - 540px) / 2;
+        y: (parent.height - 440px) / 2;
+        width: 540px;
+        height: 440px;
+        init => { S.probe-sites(false); }
+        border-radius: 8px;
+        border-width: 1.5px;
+        border-color: T.ink;
+        background: T.bg;
+        drop-shadow-offset-x: 8px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-blur: 0px;
+        drop-shadow-color: T.ink;
+        TouchArea { }
+        VerticalLayout {
+            padding: 24px;
+            spacing: 14px;
+            HorizontalLayout {
+                height: 28px;
+                VerticalLayout {
+                    spacing: 2px;
+                    Lbl { text: "NETWORK & SERVICES · 出口与常用服务诊断"; height: 14px; }
+                    Text { text: "双端出口 IP 与连通延迟"; font-family: T.sans; font-size: 20px; font-weight: 900; color: T.ink; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VCenter {
+                    Rectangle {
+                        width: 92px; height: 24px; border-radius: 4px; border-width: 1.5px; border-color: T.ink;
+                        background: ra.has-hover ? T.ink : transparent;
+                        Text { text: S.sites-testing ? "[ 检测中… ]" : "[ 重新测速 ]"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; font-weight: 700; color: ra.has-hover ? T.bg : T.ink; horizontal-alignment: center; vertical-alignment: center; }
+                        ra := TouchArea { mouse-cursor: pointer; clicked => { S.probe-sites(true); } }
+                    }
+                }
+                Rectangle { width: 8px; }
+                VCenter {
+                    Rectangle {
+                        width: 64px; height: 24px; border-radius: 4px; border-width: 1.5px; border-color: T.ink;
+                        background: ca.has-hover ? T.ink : transparent;
+                        Text { text: "[ 关闭 ]"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; font-weight: 700; color: ca.has-hover ? T.bg : T.ink; horizontal-alignment: center; vertical-alignment: center; }
+                        ca := TouchArea { mouse-cursor: pointer; clicked => { S.service-detail-open = false; } }
+                    }
+                }
+            }
+            Rectangle { height: 6px; }
+            Rectangle { height: 1.5px; background: T.ink; }
+            HorizontalLayout {
+                spacing: 12px;
+                height: 74px;
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: 5px; border-width: 1px; border-color: T.line;
+                    VerticalLayout {
+                        padding: 10px; spacing: 4px;
+                        Lbl { text: "DIRECT · 国内直连出口"; height: 14px; }
+                        Text { text: S.on ? "—" : ((S.ex-ip != "" && S.ex-ip != "—") ? S.ex-ip : "—"); font-family: T.mono; font-size: 15px; letter-spacing: 15px * T.mt; font-weight: 700; color: T.ink; }
+                        Text { text: S.on ? "本机宽带出口 · 醒着时不单独检测" : (S.ex-loc != "" ? S.ex-loc : "本机宽带出口"); font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; overflow: elide; }
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: 5px; border-width: 1.5px; border-color: T.ink;
+                    VerticalLayout {
+                        padding: 10px; spacing: 4px;
+                        Lbl { text: "PROXY · 代理窝点出口"; height: 14px; }
+                        Text { text: (S.on && S.ex-ip != "" && S.ex-ip != "—") ? S.ex-ip : (S.on ? "查找中…" : "未启用代理"); font-family: T.mono; font-size: 15px; letter-spacing: 15px * T.mt; font-weight: 700; color: T.ink; }
+                        Text { text: S.on ? (S.ex-loc != "" ? S.ex-loc : (S.node-label != "" ? "经由 " + S.node-label : "—")) : "当前休眠中 · 流量直连"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; overflow: elide; }
+                    }
+                }
+            }
+            Lbl { text: "COMMON SERVICES · 常用网站"; height: 14px; }
+            for ri in 4: HorizontalLayout {
+                spacing: 12px; height: 38px;
+                for ci in 2: Rectangle {
+                    property <SiteRow> item: S.sites[ri * 2 + ci];
+                    horizontal-stretch: 1;
+                    border-radius: 4px; border-width: 1px; border-color: T.line;
+                    HorizontalLayout {
+                        padding-left: 10px; padding-right: 10px;
+                        VCenter {
+                            Text { text: item.name; font-family: T.sans; font-size: 12.5px; font-weight: 700; color: T.ink; }
+                            Text { text: item.via == "" ? item.host : item.host + " · " + item.via; font-family: T.mono; font-size: 9.5px; letter-spacing: 9.5px * T.mt; color: T.mute; overflow: elide; }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        VCenter {
+                            HorizontalLayout { spacing: 5px;
+                                VCenter { Rectangle { width: 6px; height: 6px; border-radius: 3px; background: T.ink; opacity: S.on && S.err == "" ? 0.9 : 0.3; } }
+                                Text { text: item.ms; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: center; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// DenseAsciiCatView: 48 × 22 cells of 6.8 pt bold mono on a 4.6 × 7.1 grid inside a
+// 248 × 168 canvas, centred in this element. Rows come from present::ascii_cat.
+component AsciiCat inherits Rectangle {
+    in property <string> kind;
+    Rectangle {
+        x: (parent.width - 248px) / 2; y: (parent.height - 168px) / 2; width: 248px; height: 168px;
+        for l in S.ascii: Text {
+            x: (248px - 48 * 4.6px) / 2; y: (168px - 22 * 7.1px) / 2 + l.row * 7.1px;
+            text: l.text; font-family: T.mono; font-size: 6.8px; font-weight: 700;
+            letter-spacing: 4.6px - 6.8px * (0.619 - T.mt);
+            color: T.ink.with-alpha(l.alpha); vertical-alignment: top;
+        }
+    }
+}
+
+// RouteCardButton: padding 8/6, corner 4, 1.5 px inner stroke (dashed [4,3] when bad),
+// filled ink on hover, 35 % when dimmed. No transition.
+component RouteBox inherits Rectangle {
+    in property <Route> r;
+    in property <bool> force-hover;
+    property <bool> hov: ta.has-hover || root.force-hover;
+    property <bool> bad: root.r.bad || (S.err == "timeout" && root.r.id == 0);
+    border-radius: 4px;
+    border-width: root.bad ? 0px : 1.5px;
+    border-color: T.ink;
+    background: root.hov ? T.ink : transparent;
+    opacity: S.mode == "direct" && S.on ? 0.35 : 1;
+    if root.bad: DashBox { border-radius: 4px; thick: 1.5px; dash: 4px; gap: 3px; }
+    VerticalLayout {
+        padding-left: 8px; padding-right: 8px; padding-top: 6px; padding-bottom: 6px; spacing: 2px;
+        alignment: center;
+        Text { text: root.r.name; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; color: root.hov ? T.bg.with-alpha(0.75) : T.mute; height: 13px; vertical-alignment: center; overflow: elide; }
+        Rectangle { height: 15.6px;
+            nt := Text { x: 0; y: 0; height: 16px; width: parent.width - lt.preferred-width - 8px; text: root.r.node; font-family: T.sans; font-size: 13px; font-weight: 700; color: root.hov ? T.bg : T.ink; vertical-alignment: center; overflow: elide; }
+            lt := Text { x: parent.width - self.preferred-width; y: 2.3px; height: 14px; text: root.bad ? "超时" : S.err != "" ? "—" : root.r.delay; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: root.hov ? T.bg.with-alpha(0.75) : (root.bad ? T.ink : T.mute); font-weight: root.bad ? 700 : 400; vertical-alignment: center; }
+        }
+    }
+    callback clicked;
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+component SegText inherits Text {
+    font-family: T.sans; font-size: 13px; color: T.mute; vertical-alignment: center;
+}
+
+export component OverviewPage inherits Rectangle {
+    // ===== first run (FirstRunOverviewView) =====
+    if S.first: Rectangle {
+        // left column: 1120 - 300 - 48
+        VerticalLayout {
+            x: 0; y: 0; width: 772px; alignment: start;
+            Text { text: "WELCOME · 第一次见面"; font-family: T.mono; font-size: 11px; letter-spacing: 1.6px + 11px * T.mt; color: T.mute; height: 14px; vertical-alignment: center; }
+            Rectangle { height: 10px; }
+            Text { text: "还没有窝。"; font-family: T.sans; font-size: 72px; font-weight: 900; color: T.ink; height: 85px; vertical-alignment: center; }
+            Rectangle { height: 10px; }
+            Text { text: "PURR 是一只带路的猫。给它一个 订阅（毛线团），它就知道往哪儿走。"; font-family: T.sans; font-size: 14px; color: T.mute; height: 17px; vertical-alignment: center; }
+            Rectangle { height: 24px; }
+            // step 01
+            Rectangle {
+                height: 14px + 18px + 6px + 15px + 6px + 27px + 16px; // measured: macOS divider 101 pt below the rule
+                Rectangle { x: 0; y: 0; width: parent.width; height: 1.5px; background: T.ink; }
+                Rectangle { x: 0; y: parent.height - 1px; width: parent.width; height: 1px; background: T.line; }
+                b01 := Rectangle { x: 0; y: 14px; width: b01t.preferred-width + 10px; height: 18.4px; border-radius: 3px; background: T.ink;
+                    b01t := Text { width: parent.width; height: parent.height; text: "01"; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; font-weight: 700; color: T.bg; horizontal-alignment: center; vertical-alignment: center; } }
+                VerticalLayout { x: b01.width + 18px; y: 14px; width: parent.width - self.x; spacing: 6px;
+                    Text { text: "粘贴订阅链接"; font-family: T.sans; font-size: 15px; font-weight: 800; color: T.ink; height: 19px; vertical-alignment: center; }
+                    Text { text: "机场后台一般叫“订阅地址”或“Clash 订阅”"; font-family: T.sans; font-size: 12.5px; color: T.mute; height: 15px; vertical-alignment: center; }
+                    frin := HorizontalLayout { spacing: 12px; height: 27px;
+                        x: S.shake * 1px;
+                        fr-u := Field { horizontal-stretch: 1; height: 27px; font-size: 12.5px; text <=> S.import-url; read-only: S.importing; placeholder: "https://…/api/v1/client/subscribe?token=…";
+                                accepted => { S.do-import(); }
+                                property <bool> needs-focus: S.first-focus;
+                                changed needs-focus => { if self.needs-focus { fr-u.focus-field(); } } }
+                        VCenter { Rectangle { background: T.ink; border-radius: 4px; height: 27.6px;
+                            HorizontalLayout { padding-left: 14px; padding-right: 14px;
+                                Text { text: S.importing ? "闻一闻…" : "导入"; font-family: T.sans; font-size: 13px; font-weight: 700; color: T.bg; horizontal-alignment: center; vertical-alignment: center; }
+                            }
+                            TouchArea { mouse-cursor: pointer; clicked => { S.do-import(); } }
+                        } }
+                    }
+                }
+            }
+            for st[i] in [
+                { n: "02", b: "按住耳朵，叫醒它", d: "按住上面那对耳朵约 1 秒，或者按住 Space" },
+                { n: "03", b: "挑个走法", d: "大多数时候选 分流 就好：国内直走，其余经由窝点" }
+            ]: Rectangle {
+                height: 66px; // measured: macOS step rows repeat every 132 px at 2x
+                Rectangle { x: 0; y: parent.height - 1px; width: parent.width; height: 1px; background: T.line; }
+                nt := Text { x: 0; y: 15px; height: 15px; text: st.n; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: center; }
+                VerticalLayout { x: nt.preferred-width + 18px; y: 15px; spacing: 4px;
+                    Text { text: st.b; font-family: T.sans; font-size: 15px; font-weight: 800; color: T.ink; height: 19px; vertical-alignment: center; }
+                    Text { text: st.d; font-family: T.sans; font-size: 12.5px; color: T.mute; height: 15px; vertical-alignment: center; }
+                }
+            }
+        }
+        // right column (width 300, padding top 20, spacing 12)
+        VerticalLayout {
+            x: 772px + 48px; y: 20px; width: 300px; alignment: start; spacing: 12px;
+            HorizontalLayout { alignment: center; height: 186px; AsciiCat { kind: "empty"; width: 240px; height: 184px; } }
+            Text { text: "z z z"; font-family: T.mono; font-size: 22px; letter-spacing: 22px * T.mt; font-weight: 800; color: T.ink; horizontal-alignment: center; height: 26px; vertical-alignment: center; }
+            Text { text: "它在等一个窝"; font-family: T.sans; font-size: 12.5px; color: T.mute; horizontal-alignment: center; height: 15px; vertical-alignment: center; }
+            Rectangle {
+                height: 12px + 4 * 13.8px + 3 * 6px;
+                Rectangle { x: 0; y: 0; width: parent.width; height: 1.5px; background: T.ink; }
+                VerticalLayout { x: 0; y: 12px; spacing: 6px;
+                    for li in ["导入后它会：", "01  读取 全部窝点", "02  挨个闻一闻（测速）", "03  挑 最暖的 那个待命"]: Text {
+                        text: li; font-family: T.mono; font-size: 11.5px; letter-spacing: 11.5px * T.mt; color: T.mute; height: 14px; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+
+    // ===== normal overview =====
+    if !S.first: ovr := Rectangle {
+        // ---- hero column: caption / display / exit row / routes (300 px tall)
+        property <length> routes-h: 43px;
+        property <length> cap-h: 16px;
+        property <length> exit-y: 300px - 14px - self.routes-h - 48px;
+        Rectangle {
+            x: 0; y: 0; width: 740px; height: 300px;
+            // caption: HStack(spacing 4) of 13 pt texts
+            HorizontalLayout {
+                x: 0; y: 0; height: ovr.cap-h; spacing: 4px; alignment: start;
+                if S.err != "": SegText { text: S.mode-label + "："; font-weight: 700; color: T.ink; }
+                if S.err != "": SegText { text: "醒着，但 "; }
+                if S.err != "": Rectangle { width: ul1.preferred-width;
+                    ul1 := SegText { width: parent.width; height: parent.height; text: "流量过不去"; font-weight: 700; color: T.ink; }
+                    Rectangle { x: 0; y: parent.height - 1.5px; width: parent.width; height: 1px; background: T.ink; } }
+                if S.err == "" && S.on && S.mode == "global": SegText { text: "全局"; font-weight: 700; color: T.ink; }
+                if S.err == "" && S.on && S.mode == "global": SegText { text: "：所有流量都经由"; }
+                if S.err == "" && S.on && S.mode == "global": SegText { text: S.node-label; font-weight: 700; color: T.ink; }
+                if S.err == "" && S.on && S.mode == "global": SegText { text: "。"; }
+                if S.err == "" && S.on && S.mode == "direct": SegText { text: "直连"; font-weight: 700; color: T.ink; }
+                if S.err == "" && S.on && S.mode == "direct": SegText { text: "：醒着，但不带路，流量全部直走。"; }
+                if S.err == "" && S.on && S.mode == "rule": SegText { text: "分流"; font-weight: 700; color: T.ink; }
+                if S.err == "" && S.on && S.mode == "rule": SegText { text: "：国内直走，其余经由"; }
+                if S.err == "" && S.on && S.mode == "rule": SegText { text: S.node-label; font-weight: 700; color: T.ink; }
+                if S.err == "" && S.on && S.mode == "rule": SegText { text: "。"; }
+                if S.err == "" && S.on && !S.sys && !S.tun: Rectangle { width: ul2.preferred-width;
+                    ul2 := SegText { width: parent.width; height: parent.height; text: "但系统代理和 TUN 都关着，还没有流量经过它。"; font-weight: 700; color: T.ink; }
+                    Rectangle { x: 0; y: parent.height - 1.5px; width: parent.width; height: 1px; background: T.ink; } }
+                if S.err == "" && !S.on: SegText { text: "睡着了：系统代理已还原，内核仍在 " + S.port + " 端口待命。醒来后按"; }
+                if S.err == "" && !S.on: SegText { text: S.mode-label; font-weight: 700; color: T.ink; }
+                if S.err == "" && !S.on: SegText { text: "走。"; }
+            }
+            disp := Rectangle {
+                x: 0; y: ovr.cap-h; width: parent.width; height: ovr.exit-y - ovr.cap-h;
+                property <float> secs: T.reduce-motion ? 0 : T.time / 1000;
+                // SleepingZzzView: HStack(.bottom, spacing 10), padding-bottom 12, bob sin(t*1.25 - k*1.6)
+                if !S.on && S.err == "": HorizontalLayout {
+                    x: 0; y: disp.height - 12px - self.height; height: 163.2px; spacing: 10px; alignment: start;
+                    for z[i] in [ { s: 56, o: 0.25, a: 4 }, { s: 92, o: 0.5, a: 6 }, { s: 136, o: 1, a: 8 } ]: Rectangle {
+                        width: zt.preferred-width; height: 163.2px;
+                        zt := Text { x: 0; y: parent.height - z.s * 1.2px + Math.sin((disp.secs * 1.25 - i * 1.6) * 1rad) * z.a * 1px; height: z.s * 1.2px;
+                            text: "z"; font-family: T.sans; font-weight: 900; font-size: z.s * 1px; color: T.ink.with-alpha(z.o); vertical-alignment: top; }
+                    }
+                }
+                // PurrHeroText: HStack(.bottom, spacing 4 | 8), padding-bottom 8, dy = sin(t*f + i*2.1) * amp
+                if S.on && S.err == "": hero := HorizontalLayout {
+                    property <length> fs: S.mode == "global" ? 116px : 136px;
+                    property <float> freq: S.mode == "global" ? 100 : 70;
+                    x: 0; y: disp.height - 8px - self.height; height: self.fs * 1.2; spacing: S.mode == "global" ? 8px : 4px; alignment: start;
+                    for ch[i] in S.hero-ch: Rectangle {
+                        width: ht.preferred-width; height: hero.fs * 1.2;
+                        ht := Text { x: 0; height: parent.height; vertical-alignment: top;
+                            y: (i > 0 && S.mode != "direct" && !T.reduce-motion) ? Math.sin((disp.secs * hero.freq + i * 2.1) * 1rad) * S.amp * 1px : 0px;
+                            text: ch; font-family: T.sans; font-weight: 900; font-size: hero.fs; color: T.ink.with-alpha(S.hero-op[i]); }
+                    }
+                }
+                // troubleView: HStack(spacing 20) face 248×168 + VStack(spacing 6), padding-bottom 10
+                if S.err != "": Rectangle {
+                    x: 0; y: disp.height - 10px - 168px; width: disp.width; height: 168px;
+                    AsciiCat { x: 0; y: 0; width: 248px; height: 168px; kind: S.err; }
+                    VerticalLayout {
+                        x: 268px; y: 0; width: parent.width - 268px; height: 168px;
+                        alignment: center; spacing: 6px;
+                        Text { text: S.err == "timeout" ? "TROUBLE · 节点超时" : S.err == "offline" ? "TROUBLE · 断网" : S.err == "sub" ? "TROUBLE · 订阅过期" : "TROUBLE · 端口被占"; font-family: T.mono; font-size: 11px; letter-spacing: 1.6px + 11px * T.mt; color: T.mute; height: 14px; vertical-alignment: center; }
+                        Text { text: S.tr-h; font-family: T.sans; font-size: 30px; font-weight: 900; color: T.ink; height: 35px; vertical-alignment: center; }
+                        Text { text: S.trouble-desc; font-family: T.sans; font-size: 13px; color: T.mute; wrap: word-wrap; }
+                        HorizontalLayout { spacing: 10px; alignment: start; padding-top: 6px; height: 6px + 24.4px;
+                            for a[i] in (S.trouble-secondary == "" ? [{ label: S.trouble-action, key: "primary" }] : S.tr-acts): Rectangle {
+                                border-radius: 4px; clip: true;
+                                background: i == 0 ? T.ink : transparent;
+                                HorizontalLayout { padding-left: 12px; padding-right: 12px; padding-top: 5px; padding-bottom: 5px;
+                                    Text { text: a.label; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; font-weight: 600; color: i == 0 ? T.bg : T.ink; vertical-alignment: center; }
+                                }
+                                Rectangle { border-width: 0.75px; border-color: T.ink; border-radius: 4px; }
+                                TouchArea { mouse-cursor: pointer; clicked => { S.fix(a.key); } }
+                            }
+                            if S.tr-cd != "": Text { text: S.tr-cd; font-family: T.mono; font-size: 11.5px; letter-spacing: 11.5px * T.mt; color: T.mute; vertical-alignment: center; }
+                        }
+                    }
+                }
+            }
+            // Exit row + system proxy / TUN toggles: padding-vertical 8, 1 px top line
+            Rectangle {
+                x: 0; y: ovr.exit-y; width: parent.width; height: 48px;
+                Rectangle { x: 0; y: 0; width: parent.width; height: 1px; background: T.line; }
+                HorizontalLayout {
+                    y: 8px; height: 32px; width: parent.width; spacing: 10px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        height: 32px;
+                        HorizontalLayout {
+                            alignment: start; spacing: 8px; height: 32px;
+                            VCenter {
+                                Rectangle {
+                                    height: 17.8px; border-radius: 3px; background: T.ink;
+                                    HorizontalLayout { padding-left: 6px; padding-right: 6px;
+                                        Text { text: "当前 IP"; font-family: T.mono; font-size: 11.5px; letter-spacing: 11.5px * T.mt; font-weight: 700; color: T.bg; vertical-alignment: center; }
+                                    }
+                                }
+                            }
+                            Text { text: (S.ex-ip != "" && S.ex-ip != "—") ? S.ex-ip : "—"; font-family: T.mono; font-size: 14.5px; letter-spacing: 14.5px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: center; }
+                            Text { text: S.err != "" ? "本地 IP · 代理异常（" + S.tr-st + "）" : S.ex-loc != "" ? S.ex-loc : (S.on ? S.node-label : "直连 · 本地网络"); font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; color: T.mute; vertical-alignment: center; overflow: elide; }
+                        }
+                        TouchArea { mouse-cursor: pointer; clicked => { S.service-detail-open = true; } }
+                    }
+                    TakeoverBtn { icon: "sys"; label: "系统代理"; active: S.sys; clicked => { S.toggle-sys(); } }
+                    TakeoverBtn { icon: "tun"; label: "虚拟网卡"; active: S.tun; need-auth: !S.tun-auth && !S.tun; clicked => { S.toggle-tun(); } }
+                }
+            }
+            // routes: HStack(spacing 8), padding-bottom 14
+            route-scroll := ScrollView {
+                x: 0; y: 300px - 14px - ovr.routes-h; width: parent.width; height: ovr.routes-h;
+                property <length> routes-width: max(self.width, S.routes.length * 175px + max(0, S.routes.length - 1) * 8px);
+                content-width: self.routes-width;
+                content-height: ovr.routes-h;
+                HorizontalLayout { width: route-scroll.routes-width; height: route-scroll.height; spacing: 8px;
+                for r[i] in S.routes: RouteBox {
+                    width: (route-scroll.routes-width - (S.routes.length - 1) * 8px) / Math.max(1, S.routes.length); r: r;
+                    clicked => { S.pick-group(i); S.go(1); }
+                }
+                }
+            }
+        }
+        // ---- stats 2×3 (x 780, width 340, padding-leading 24, 1.5 px leading rule)
+        Rectangle {
+            x: 780px; y: 0; width: 340px; height: 300px;
+            Rectangle { x: 0; y: 0; width: 1.5px; height: parent.height; background: T.ink; }
+            property <length> cw: (340px - 24px - 20px) / 2;
+            StatCell { x: 24px; y: 0; width: parent.cw; height: 100px; label: "DOWN · 下行网速 ↓"; value: S.dn; unit: "MB/s"; small: S.dn-s; }
+            StatCell { x: 24px + parent.cw + 20px; y: 0; width: parent.cw; height: 100px; label: "UP · 上行网速 ↑"; value: S.up; unit: "MB/s"; small: S.up-s; }
+            StatCell { x: 24px; y: 100px; width: parent.cw; height: 100px; label: S.l3; value: S.tm; unit: ""; small: S.tm-s; }
+            StatCell { x: 24px + parent.cw + 20px; y: 100px; width: parent.cw; height: 100px; label: "TODAY"; value: S.tot; unit: S.total-unit; small: S.tot-s; }
+            StatCell { x: 24px; y: 200px; width: parent.cw; height: 100px; label: "CONNECTIONS"; value: S.cnt; unit: "条"; small: S.cnt-s; border: false; }
+            StatCell { x: 24px + parent.cw + 20px; y: 200px; width: parent.cw; height: 100px; label: "MEMORY · 内存"; value: S.mem; unit: "MB"; small: S.mem-s; border: false; meter: true; pct: S.mem-pct; }
+        }
+        // ---- traffic scope: padding-top 14, VStack(spacing 8): header + 170 px canvas,
+        // centred vertically in the bottom row (.frame(maxHeight: .infinity))
+        Rectangle {
+            x: 0; y: 300px + (parent.height - 300px - self.height) / 2; width: 740px; height: 14px + 13.2px + 8px + 170px;
+            Rectangle { x: 0; y: 0; width: parent.width; height: 1.5px; background: T.ink; }
+            HorizontalLayout { x: 0; y: 14px; width: parent.width; height: 13.2px;
+                Text { horizontal-stretch: 0; text: "TRAFFIC · LAST 60S"; font-family: T.mono; font-size: 11px; letter-spacing: 1.6px + 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                HorizontalLayout { spacing: 14px; horizontal-stretch: 0;
+                    HorizontalLayout { spacing: 6px;
+                        VCenter { Rectangle { width: 16px; height: 2px; background: T.ink; } }
+                        Text { text: "下行"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                    }
+                    HorizontalLayout { spacing: 6px;
+                        VCenter { Rectangle { width: 16px; height: 1.5px; background: T.ink; } }
+                        Text { text: "上行"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                    }
+                }
+                Rectangle { width: 16px; }
+                Text { horizontal-stretch: 0; text: S.peak; font-family: T.mono; font-size: 11px; letter-spacing: 1.6px + 11px * T.mt; color: T.mute; vertical-alignment: center; }
+            }
+            // chart (canvas 740×170): labels are 10 pt mono centred on their anchor points
+            chart := Rectangle {
+                x: 0; y: 14px + 13.2px + 8px; width: parent.width; height: 170px;
+                property <length> W: self.width - 58px;
+                property <length> top: 8px;
+                property <length> bot: self.height - 20px;
+                for v[i] in [0, 0.5, 1]: Rectangle {
+                    property <length> yy: chart.bot - v * (chart.bot - chart.top);
+                    Rectangle { x: 0; y: parent.yy - 0.5px; width: chart.W; height: 1px; background: T.line; }
+                    Text { x: chart.W + 30px - self.preferred-width / 2; y: parent.yy - self.preferred-height / 2; text: S.chart-lbl[i]; font-family: T.mono; font-size: 10px; letter-spacing: 10px * T.mt; color: T.mute; }
+                }
+                Text { x: 16px - self.preferred-width / 2; y: chart.height - 6px - self.preferred-height / 2; text: "−60s"; font-family: T.mono; font-size: 10px; letter-spacing: 10px * T.mt; color: T.mute; }
+                Text { x: chart.W / 2 - self.preferred-width / 2; y: chart.height - 6px - self.preferred-height / 2; text: "−30s"; font-family: T.mono; font-size: 10px; letter-spacing: 10px * T.mt; color: T.mute; }
+                Text { x: chart.W - 14px - self.preferred-width / 2; y: chart.height - 6px - self.preferred-height / 2; text: "现在"; font-family: T.mono; font-size: 10px; letter-spacing: 10px * T.mt; color: T.mute; }
+                Path { width: 740px; height: 170px; viewbox-x: 0; viewbox-y: 0; viewbox-width: 740; viewbox-height: 170; fit: fill;
+                       commands: S.chart-up; stroke: T.ink; stroke-width: 1.5px; stroke-line-join: round; }
+                Path { width: 740px; height: 170px; viewbox-x: 0; viewbox-y: 0; viewbox-width: 740; viewbox-height: 170; fit: fill;
+                       commands: S.chart-dn; stroke: T.ink; stroke-width: 2.2px; stroke-line-join: round; }
+            }
+        }
+        // ---- side: padding-top 12, leading 24, VStack(spacing 18)
+        Rectangle {
+            x: 780px; y: 300px; width: 340px; height: parent.height - 300px;
+            Rectangle { x: 0; y: 0; width: parent.width; height: 1.5px; background: T.ink; }
+            // the leading rule only spans the panel's content (overlay on the padded VStack)
+            Rectangle { x: 0; y: 0; width: 1.5px; height: 12px + side-col.preferred-height; background: T.ink; }
+            side-col := VerticalLayout {
+                x: 24px; y: 12px; width: parent.width - 24px; spacing: 18px; alignment: start;
+                VerticalLayout { spacing: 8px;
+                    Text { text: "TODAY · 去向"; font-family: T.mono; font-size: 11px; letter-spacing: 1.6px + 11px * T.mt; color: T.mute; height: 14px; vertical-alignment: center; }
+                    // stripes (line colour, 1.5 px, every 6 px), ink share, 1.5 px centred outline
+                    Rectangle { height: 14px;
+                        Rectangle { width: 100%; height: 100%; clip: true;
+                            for k in 64: Path { x: (k * 6 - 20) * 1px; y: 0; width: 14px; height: 14px;
+                                viewbox-x: 0; viewbox-y: 0; viewbox-width: 14; viewbox-height: 14;
+                                commands: "M0 14 L14 0"; stroke: T.line; stroke-width: 1.5px; }
+                            Rectangle { x: 0; y: 0; width: parent.width * S.sbar-p / 100; height: parent.height; background: T.ink; }
+                        }
+                        Rectangle { x: -0.75px; y: -0.75px; width: parent.width + 1.5px; height: parent.height + 1.5px; border-width: 1.5px; border-color: T.ink; }
+                    }
+                    VerticalLayout { spacing: 4px;
+                        HorizontalLayout { height: 13.2px;
+                            Text { text: "■ 经过窝点 "; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                            Text { text: S.proxy-detail; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: center; }
+                            Text { text: " · " + Math.round(S.proxy-fraction * 100) + "%"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: "▨ 直连 "; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                            Text { text: S.direct-detail; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: center; }
+                            Text { text: " · " + (100 - Math.round(S.proxy-fraction * 100)) + "%"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                        }
+                        HorizontalLayout { height: 13.2px; alignment: start;
+                            Text { text: "抓到 "; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                            Text { text: S.blocked-detail; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: center; }
+                            Text { text: " 只老鼠（广告 / 追踪）"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 6px + 15.6px;
+                    Rectangle { x: 0; y: 0; width: parent.width; height: 1px; background: T.line; }
+                    HorizontalLayout {
+                        x: 0; y: 6px; width: parent.width; height: 15.6px; spacing: 6px;
+                        Text { text: "YARN · 订阅"; font-family: T.mono; font-size: 11px; letter-spacing: 1.6px + 11px * T.mt; color: T.mute; vertical-alignment: bottom; height: 14px; }
+                        Text { text: S.subi-n; font-family: T.sans; font-size: 13px; font-weight: 700; color: T.ink; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: S.subi-warn ? "⚠ 已过期 · 窝点全部停用" : S.sub-detail; font-family: T.mono; font-size: 11.5px; letter-spacing: 11.5px * T.mt; color: S.subi-warn ? T.ink : T.mute; vertical-alignment: bottom; height: 14px; }
+                    }
+                }
+            }
+        }
+    }
+}

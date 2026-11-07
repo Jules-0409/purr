@@ -1,0 +1,211 @@
+// 窝点 — latency spectrum + node stability
+import { T, Anim } from "theme.slint";
+import { S, Stem } from "state.slint";
+import { Icon } from "icons.slint";
+import { Face } from "faces.slint";
+import { Lbl, Bk, DashV, DashH, GTabs } from "widgets.slint";
+
+component VCenter inherits VerticalLayout { alignment: center; horizontal-stretch: 0; }
+
+// Page header: HStack(alignment: .firstTextBaseline): title 34 black + subtitle 13 medium.
+// Trailing controls are laid out from `ctl-y`, which puts a 12 pt control text
+// (3 px top padding) on the title's baseline.
+export component PageHead inherits Rectangle {
+    in property <string> title;
+    in property <string> sub;
+    in property <length> spacing: 24px;
+    out property <length> ctl-y: 17.4px;
+    height: 40.8px;
+    HorizontalLayout { spacing: root.spacing;
+        Rectangle { horizontal-stretch: 0; width: tt.preferred-width + (root.sub != "" ? 12px + st.preferred-width : 0px);
+            tt := Text { x: 0; y: 0; height: 40px; text: root.title; font-family: T.sans; font-size: 34px; font-weight: 900; color: T.ink; vertical-alignment: top; }
+            st := Text { x: tt.preferred-width + 12px; y: 20.4px; height: 16px; visible: root.sub != ""; text: root.sub; font-family: T.sans; font-size: 13px; font-weight: 500; color: T.mute; vertical-alignment: top; }
+        }
+        @children
+    }
+}
+
+// a control placed on the header baseline
+export component HeadSlot inherits VerticalLayout {
+    in property <length> dy: 17.4px;
+    alignment: start; horizontal-stretch: 0;
+    padding-top: root.dy;
+}
+
+export component EmptyState inherits VerticalLayout {
+    in property <string> title;
+    in property <string> body;
+    in property <string> btn;
+    alignment: start;
+    Rectangle { height: 90px; }
+    HorizontalLayout { alignment: center; Face { kind: "empty"; width: 90px; height: 90px; } }
+    Rectangle { height: 10px; }
+    Text { text: root.title; font-family: T.sans; font-size: 22px; font-weight: 900; color: T.ink; horizontal-alignment: center; height: 26px; vertical-alignment: center; }
+    Rectangle { height: 4px; }
+    Text { text: root.body; font-family: T.sans; font-size: 13px; color: T.mute; horizontal-alignment: center; height: 18.85px; vertical-alignment: center; }
+    if root.btn != "": Rectangle { height: 16px; }
+    if root.btn != "": HorizontalLayout { alignment: center;
+        Rectangle { background: T.ink; border-radius: 4px; height: 30.85px;
+            HorizontalLayout { padding-left: 14px; padding-right: 14px;
+                Text { text: root.btn; font-family: T.sans; font-size: 13px; font-weight: 700; color: T.bg; vertical-alignment: center; } }
+            TouchArea { mouse-cursor: pointer; clicked => { S.go(2); } }
+        }
+    }
+}
+
+export component MNote inherits Rectangle {
+    in property <string> line1;
+    in property <string> line2;
+    in property <string> bold;
+    background: T.bg;
+    border-width: 1.5px; border-color: T.ink;
+    drop-shadow-offset-x: 6px; drop-shadow-offset-y: 6px; drop-shadow-blur: 0px; drop-shadow-color: T.ink;
+    width: lay.preferred-width;
+    height: lay.preferred-height;
+    lay := VerticalLayout { padding-left: 21.5px; padding-right: 21.5px; padding-top: 15.5px; padding-bottom: 15.5px;
+        HorizontalLayout { alignment: center;
+            Text { text: root.line1; font-family: T.sans; font-size: 13px; color: T.ink; horizontal-alignment: center; }
+            if root.bold != "": Text { text: root.bold; font-family: T.sans; font-size: 13px; font-weight: 800; color: T.ink; }
+            if root.bold != "": Text { text: "。"; font-family: T.sans; font-size: 13px; color: T.ink; }
+        }
+        if root.line2 != "": Text { text: root.line2; font-family: T.sans; font-size: 13px; color: T.ink; horizontal-alignment: center; }
+    }
+    TouchArea { }
+}
+
+// Stem: line from the axis up to topY with a 6 px flag tick (2.6 px when selected, dashed
+// [4,3] when shaky), a 7 px base dot, and a 170 px label frame centred at sx ± 91, topY + 13.
+component StemView inherits Rectangle {
+    in property <Stem> s;
+    in property <length> spec-w;
+    in property <float> position;
+    in property <bool> labels;
+    property <length> h: root.s.stem-height;
+    property <length> bw: root.s.selected ? 2.6px : 1.5px;
+    property <bool> flip: root.position > 0.78;
+    x: root.spec-w * root.position;
+    width: 0px;
+    if !root.labels && !root.s.shaky: Rectangle { x: -root.bw / 2; y: 0; width: root.bw; height: root.h; background: T.ink; }
+    if !root.labels && root.s.shaky: DashV { x: -root.bw / 2; y: 0; height: root.h; thick: root.bw; dash: 4px; gap: 3px; }
+    if !root.labels: Rectangle { x: root.flip ? -6px : 0px; y: -root.bw / 2; width: 6px; height: root.bw; background: T.ink; }
+    // base dot: 7 px circle, 1.5 px centred stroke
+    if !root.labels: Rectangle {
+        x: -4.25px; y: root.h - 4.25px;
+        width: 8.5px; height: 8.5px; border-radius: 4.25px;
+        background: root.s.shaky ? T.bg : T.ink;
+        border-width: 1.5px; border-color: T.ink;
+    }
+    if root.labels: lb := Rectangle {
+        x: root.flip ? -6px - self.width : 6px;
+        y: 13px - self.height / 2;
+        width: bl.preferred-width; height: bl.preferred-height;
+        border-radius: 3px;
+        clip: true;
+        background: root.s.selected ? T.ink : T.bg;
+        bl := VerticalLayout { padding-left: 7px; padding-right: 7px; padding-top: 3px; padding-bottom: 3px; spacing: 1px;
+            Text { text: root.s.name; font-family: T.sans; font-size: 13px; font-weight: 700; color: root.s.selected ? T.bg : T.ink;
+                   height: 16px; vertical-alignment: center; horizontal-alignment: root.flip ? right : left; }
+            Text { text: root.s.delay-text + (root.s.jitter != "" ? " ±" + root.s.jitter : "") + (root.s.loss != "" && root.s.loss != "0" ? " · 丢 " + root.s.loss + "%" : ""); font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; color: root.s.selected ? T.bg.with-alpha(0.75) : T.mute;
+                   height: 13px; vertical-alignment: center; horizontal-alignment: root.flip ? right : left; }
+        }
+        Rectangle { border-width: 0.5px; border-radius: 3px; border-color: root.s.selected ? T.ink : T.line.with-alpha(T.line.alpha * 0.8); }
+        ba := TouchArea { mouse-cursor: pointer; clicked => { S.pick-node(root.s.id); } changed has-hover => { S.hover-node(self.has-hover ? root.s.id : -1); } }
+    }
+}
+
+// ndMetric: VStack(spacing 2): 10 pt mono label (tracking 1.4), 22 pt bold value + 11 pt unit, width 88
+component NdVal inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    in property <string> unit;
+    alignment: end; spacing: 2px;
+    // macOS: lineLimit(1) + fixedSize — the label keeps one line and may run past the 88 pt column.
+    Rectangle { height: 13px;
+        Text { x: 0; y: 0; width: self.preferred-width; height: 13px; text: root.label; font-family: T.mono; font-size: 10px; letter-spacing: 1.4px + 10px * T.mt; color: T.mute; vertical-alignment: center; }
+    }
+    Rectangle { height: 26.4px;
+        vt := Text { x: 0; y: 0; height: 26px; text: root.value; font-family: T.mono; font-size: 22px; letter-spacing: 22px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: top; }
+        Text { x: vt.preferred-width + 2px; y: 10.4px; height: 14px; text: root.unit; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: top; }
+    }
+}
+
+export component NodesPage inherits Rectangle {
+    // 刻度自适应（与 Mac logX 同式）：右端 = max(250, 最慢已测节点 × 1.08 取整到 50)，
+    // 超过 250ms 的节点不再全挤在边上。
+    property <int> top: Math.max(250, S.sp-top);
+    pure function spectrum-x(ms: int) -> float {
+        let v = Math.min(root.top, Math.max(15, ms));
+        return Math.min(0.95, Math.max(0.03, 0.03 + 0.92 * (0.62 * (v - 15) / (root.top - 15) + 0.38 * Math.ln(v / 15) / Math.ln(root.top / 15))));
+    }
+    pure function stem-ms(ms: int) -> int {
+        return ms >= 999 ? Math.round(root.top * 0.968) : Math.min(Math.round(root.top * 0.968), ms);
+    }
+    ph := PageHead {
+        x: 0; y: 0; width: parent.width;
+        title: "窝点"; sub: "挑个暖和的窝";
+        if !S.first: HeadSlot { GTabs { items: S.groups; selected: S.gi; picked(i) => { S.pick-group(i); } } }
+        Rectangle { horizontal-stretch: 1; }
+        if !S.first: HeadSlot { dy: 20.4px;
+            HorizontalLayout { spacing: 16px;
+                HorizontalLayout { spacing: 4px; height: 14.4px;
+                    Text { text: "当前"; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; color: T.mute; vertical-alignment: center; }
+                    Text { text: S.groups.length > 0 ? S.groups[S.gi] + " → " + S.g-now-a : S.g-now-a; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: center; }
+                }
+                VerticalLayout { padding-top: -3px; Bk { text: S.testing ? "闻一闻…" : "测速"; icon: "test"; clicked => { S.run-test(); } } }
+            }
+        }
+    }
+    if S.first: EmptyState { x: 0; y: 34px + 8px; width: parent.width; title: "还没有窝点"; body: "先导入一个订阅，窝点会出现在这里，按延迟从暖到凉排开。"; btn: "去导入订阅"; }
+    if !S.first: spec := Rectangle {
+        x: 0; y: 40.8px + 12px; width: parent.width; height: 316px;
+        opacity: S.testing ? 0.35 : 1;
+        // zones: dashed [4,4] line-colour rules, 10.5 pt labels centred at zx + 42, y 8
+        for z in [ { p: 0, t: "WARM · 暖" }, { p: root.spectrum-x(80), t: "MILD · 温" }, { p: root.spectrum-x(150), t: "COLD · 凉" } ]: Rectangle {
+            x: spec.width * z.p; y: 0; width: 1px; height: spec.height - 28px;
+            DashV { x: -0.5px; y: 0; height: parent.height; thick: 1px; dash-color: T.line; dash: 4px; gap: 4px; }
+            Text { x: 42px - self.preferred-width / 2; y: 8px - self.preferred-height / 2; text: z.t; font-family: T.mono; font-size: 10.5px; letter-spacing: 1.6px + 10.5px * T.mt; color: T.mute; }
+        }
+        Rectangle { x: 0; y: spec.height - 28px - 0.75px; width: spec.width; height: 1.5px; background: T.ink; }
+        for tk in (root.top <= 250 ? [15, 45, 80, 120, 180, 250] : [15, 45, 80, 150, Math.max(180, Math.round(root.top * 0.06) * 10), root.top]): Text {
+            x: spec.width * root.spectrum-x(tk) - self.width / 2; y: spec.height - 10px - self.height / 2;
+            text: tk + "ms"; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; color: T.mute;
+        }
+        // macOS draws each node's stem then its flag in one ForEach, so a later stem crosses an earlier flag.
+        for st in S.stems: Rectangle {
+            x: 0; y: spec.height - 28px - st.stem-height; width: spec.width; height: st.stem-height;
+            StemView { s: st; position: root.spectrum-x(root.stem-ms(st.delay)); spec-w: spec.width; y: 0; height: parent.height; }
+            StemView { s: st; labels: true; position: root.spectrum-x(root.stem-ms(st.delay)); spec-w: spec.width; y: 0; height: parent.height; }
+        }
+    }
+    // node stability bar: padding-top 14 under a 1.5 px rule, HStack(.bottom, spacing 18)
+    if !S.first: Rectangle {
+        x: 0; y: 40.8px + 12px + 316px; width: parent.width; height: 14px + 70px;
+        Rectangle { x: 0; y: 0; width: parent.width; height: 1.5px; background: T.ink; }
+        HorizontalLayout {
+            x: 0; y: 14px; width: parent.width; spacing: 18px; height: 60px;
+            VerticalLayout { width: 190px; alignment: end; spacing: 2px;
+                Text { text: S.nd-lbl; font-family: T.mono; font-size: 10px; letter-spacing: 1.5px + 10px * T.mt; color: T.mute; height: 13px; vertical-alignment: center; }
+                Text { text: S.nd-name; font-family: T.sans; font-size: 20px; font-weight: 900; color: T.ink; height: 24px; vertical-alignment: center; }
+                Text { text: S.nd-sub; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; height: 14px; vertical-alignment: center; }
+            }
+            NdVal { width: 88px; label: "延迟"; value: S.nd-lat; unit: (S.nd-lat == "—" || S.nd-lat == "" || S.nd-lat == "超时" || S.nd-lat == "…") ? "" : "ms"; }
+            NdVal { width: 88px; label: "抖动"; value: S.nd-jit; unit: (S.nd-jit == "—" || S.nd-jit == "" || S.nd-jit == "超时" || S.nd-jit == "…") ? "" : "ms"; }
+            NdVal { width: 88px; label: "丢包"; value: S.nd-loss; unit: (S.nd-loss == "—" || S.nd-loss == "" || S.nd-loss == "超时" || S.nd-loss == "…") ? "" : "%"; }
+            NdVal { width: 88px; label: S.nd-n > 0 ? "探测成功 · 近 " + S.nd-n + " 次" : "探测成功"; value: S.nd-up; unit: (S.nd-up == "—" || S.nd-up == "" || S.nd-up == "超时" || S.nd-up == "…") ? "" : "%"; }
+            VerticalLayout { horizontal-stretch: 1; alignment: end; spacing: 4px;
+                Text { text: S.nd-n > 0 ? "最近 " + S.nd-n + " 次测速 · × = 没回应" : "还没测过 · × = 没回应"; font-family: T.mono; font-size: 10px; letter-spacing: 1.4px + 10px * T.mt; color: T.mute; height: 13px; vertical-alignment: center; }
+                spark := Rectangle { height: 44px;
+                    if S.sp-dot >= 0: DashH { x: 0; y: S.sp-dot * 1px - 0.5px; width: parent.width; thick: 1px; dash-color: T.line; dash: 3px; gap: 3px; }
+                    Path { width: parent.width; height: parent.height; viewbox-x: 0; viewbox-y: 0; viewbox-width: 230; viewbox-height: 44; fit: fill;
+                           commands: S.sp-ln; stroke: T.ink; stroke-width: 1.6px; stroke-line-join: round; }
+                    if S.sp-x != "" && S.sp-x != "M0 0": Path { width: parent.width; height: parent.height; viewbox-x: 0; viewbox-y: 0; viewbox-width: 230; viewbox-height: 44; fit: fill;
+                           commands: S.sp-x; stroke: T.ink; stroke-width: 1.4px; }
+                }
+            }
+            VerticalLayout { width: 230px; alignment: end; spacing: 3px;
+                Text { text: S.vd-b; font-family: T.sans; font-size: 15px; font-weight: 900; color: T.ink; height: 19px; vertical-alignment: center; }
+                Text { text: S.vd-s; font-family: T.sans; font-size: 12px; color: T.mute; height: 15px; vertical-alignment: center; }
+            }
+        }
+    }
+}

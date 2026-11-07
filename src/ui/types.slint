@@ -1,0 +1,13 @@
+export struct NodeItem {
+    id: int, name: string, real-name: string, group: string, kind: string,
+    delay: int, delay-text: string, selected: bool, stem-height: length, stem-x: length, col: int,
+    jitter: string, loss: string, uptime: string, shaky: bool,
+}
+export struct GroupTab { id: int, name: string, selected: bool, node: string, delay: string, bad: bool }
+export struct ConnRow { id: string, app: string, host: string, rule: string, policy: string, kind: int, down: string, up: string, age: string }
+export struct RuleRow { index: string, kind: string, payload: string, policy: string, tone: int, hits: string }
+export struct LogRow { time: string, level: string, message: string }
+export struct SubscriptionRow { id: string, title: string, detail: string, used: string, total: string, fraction: float, expiry: string, active: bool, expired: bool }
+
+export struct SiteRow { name: string, host: string, via: string, ms: string }
+export struct TrayNode { group: string, node: string, name: string, delay: string, selected: bool, verdict: string }

@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Native paths and keyframes adapted from the supplied purr-slint frontend.
+import { Icon } from "native-icons.slint";
+import { IconClock } from "tokens.slint";
+export { IconClock } from "tokens.slint";
+export component CatIcon inherits Icon {
+    in property <string> kind: "ov";
+    in property <bool> awake: IconClock.awake;
+    in property <bool> hovered: false;
+    width: 22px; height: 22px;
+    name: root.kind;
+    eyes-open: root.awake;
+    blink: root.awake && IconClock.awake;
+    live: root.kind == "snd" ? root.awake : IconClock.awake;
+    hover: root.hovered;
+}

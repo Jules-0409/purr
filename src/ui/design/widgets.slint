@@ -1,0 +1,326 @@
+// Shared widgets for the PURR Slint port
+import { T, Anim } from "theme.slint";
+import { Icon } from "icons.slint";
+import { S } from "state.slint";
+import { Knob } from "../knob.slint";
+export { Knob } from "../knob.slint";
+
+// .lbl — mono 11px, letter-spacing .16em, muted, uppercase (strings are passed already upper-cased)
+export component Lbl inherits Text {
+    font-family: T.mono;
+    font-size: 11px;
+    letter-spacing: 11px * 0.16;
+    color: T.mute;
+    vertical-alignment: center;
+}
+
+export component MonoText inherits Text {
+    font-family: T.mono;
+    font-size: 12px;
+    color: T.ink;
+    vertical-alignment: center;
+}
+
+export component SansText inherits Text {
+    font-family: T.sans;
+    font-size: 13px;
+    color: T.ink;
+    vertical-alignment: center;
+}
+
+// Horizontal dashed line (border-style: dashed)
+export component DashH inherits Rectangle {
+    in property <length> thick: 1px;
+    in property <color> dash-color: T.ink;
+    in property <length> dash: 3px;
+    in property <length> gap: 3px;
+    height: self.thick;
+    clip: true;
+    for i in Math.ceil(root.width / (root.dash + root.gap)): Rectangle {
+        x: i * (root.dash + root.gap);
+        y: 0;
+        width: root.dash;
+        height: root.thick;
+        background: root.dash-color;
+    }
+}
+
+export component DashV inherits Rectangle {
+    in property <length> thick: 1px;
+    in property <color> dash-color: T.ink;
+    in property <length> dash: 3px;
+    in property <length> gap: 3px;
+    width: self.thick;
+    clip: true;
+    for i in Math.ceil(root.height / (root.dash + root.gap)): Rectangle {
+        x: 0;
+        y: i * (root.dash + root.gap);
+        width: root.thick;
+        height: root.dash;
+        background: root.dash-color;
+    }
+}
+
+// A box with a dashed border (children go on top)
+export component DashBox inherits Rectangle {
+    in property <length> thick: 1.5px;
+    in property <color> dash-color: T.ink;
+    in property <length> dash: 4px;
+    in property <length> gap: 3px;
+    DashH { x: 0; y: 0; width: root.width; thick: root.thick; dash-color: root.dash-color; dash: root.dash; gap: root.gap; }
+    DashH { x: 0; y: root.height - root.thick; width: root.width; thick: root.thick; dash-color: root.dash-color; dash: root.dash; gap: root.gap; }
+    DashV { x: 0; y: 0; height: root.height; thick: root.thick; dash-color: root.dash-color; dash: root.dash; gap: root.gap; }
+    DashV { x: root.width - root.thick; y: 0; height: root.height; thick: root.thick; dash-color: root.dash-color; dash: root.dash; gap: root.gap; }
+    @children
+}
+
+// repeating-linear-gradient(90deg, var(--line) 0 Wpx, transparent Wpx Ppx)
+export component Stripes inherits Rectangle {
+    in property <length> bar: 2px;
+    in property <length> period: 6px;
+    in property <color> dash-color: T.line;
+    clip: true;
+    for i in Math.ceil(root.width / root.period): Rectangle {
+        x: i * root.period;
+        y: 0;
+        width: root.bar;
+        height: root.height;
+        background: root.dash-color;
+    }
+}
+
+// PurrBracketButton: "[ icon label ]", 12 pt semibold mono, tracking .5, padding 4/3,
+// filled ink on hover (corner 3), no border and no transition.
+export component Bk inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <length> font-size: 12px;
+    in property <bool> enabled: true;
+    in property <bool> force-hover;
+    callback clicked;
+    property <bool> hov: ta.has-hover || root.force-hover;
+    property <color> fg: root.hov ? T.bg : T.ink;
+    background: root.hov ? T.ink : transparent;
+    border-radius: 3px;
+    height: bl.preferred-height;
+    bl := HorizontalLayout {
+        padding-left: 4px; padding-right: 4px; padding-top: 3.5px; padding-bottom: 3.5px;
+        spacing: 5px;
+        alignment: start;
+        Text { text: "["; font-family: T.mono; font-size: root.font-size; font-weight: 600; letter-spacing: 0.5px + root.font-size * T.mt; color: root.fg; vertical-alignment: center; }
+        if root.icon != "": VerticalLayout { alignment: center; Icon { name: root.icon; width: 14px; height: 14px; stroke: 2; tint: root.fg; hover: root.hov; eyes-open: true; } }
+        Text { text: root.text; font-family: T.mono; font-size: root.font-size; font-weight: 600; letter-spacing: 0.5px + root.font-size * T.mt; color: root.fg; vertical-alignment: center; }
+        Text { text: "]"; font-family: T.mono; font-size: root.font-size; font-weight: 600; letter-spacing: 0.5px + root.font-size * T.mt; color: root.fg; vertical-alignment: center; }
+    }
+    ta := TouchArea { mouse-cursor: pointer; enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+// Interruptible knob motion with SwiftUI's additive timing-curve semantics:
+// value = target + sum(delta_i * (1 - curve(elapsed_i / 0.5 s))).
+component SwitchMotion inherits Rectangle {
+    width: 0px; height: 0px;
+    in property <bool> on;
+    in property <bool> bounce;
+    out property <float> value: root.target
+        + root.d0 * (1 - root.curve(root.clock - root.s0))
+        + root.d1 * (1 - root.curve(root.clock - root.s1))
+        + root.d2 * (1 - root.curve(root.clock - root.s2));
+    private property <float> target: root.on ? 1 : 0;
+    private property <float> d0; private property <float> d1; private property <float> d2;
+    private property <float> s0: -100000; private property <float> s1: -100000; private property <float> s2: -100000;
+    private property <int> slot;
+    private property <bool> moving;
+    private property <float> clock: root.moving && !T.reduce-motion ? animation-tick() / 1ms : 1000000000;
+    pure function curve(ms: float) -> float {
+        return ms >= 500 ? 1 : ms <= 0 ? 0 : (root.bounce ? Anim.bezier(ms / 500, 0.35, 1.7, 0.5, 1) : Anim.ease(ms / 500));
+    }
+    private property <float> last-start: -100000;
+    changed on => {
+        let now = animation-tick() / 1ms;
+        let delta = self.on ? -1 : 1; // previous target minus new target
+        if self.slot == 0 { self.d0 = delta; self.s0 = now; }
+        if self.slot == 1 { self.d1 = delta; self.s1 = now; }
+        if self.slot == 2 { self.d2 = delta; self.s2 = now; }
+        self.slot = Math.mod(self.slot + 1, 3);
+        self.last-start = now;
+        self.moving = true;
+    }
+    Timer {
+        interval: 16ms; running: root.moving;
+        triggered => { if (animation-tick() / 1ms - root.last-start >= 500) { root.moving = false; root.d0 = 0; root.d1 = 0; root.d2 = 0; } }
+    }
+}
+
+// CatSwitchView track: 56×30, corner 15. Off = bg + 1 px line stripes every 5 px and a
+// "z"; on = ink. The 1.5 px stroke is centred on the edge (not clipped). No fade.
+export component CatSwitch inherits Rectangle {
+    in property <bool> on;
+    in property <bool> hover;
+    out property <float> fill-progress: root.on ? 1 : 0;
+    width: 56px; height: 30px;
+    Rectangle {
+        width: 100%; height: 100%;
+        border-radius: 15px;
+        clip: true;
+        background: root.on ? T.ink : T.bg;
+        if !root.on: Path {
+            width: parent.width; height: parent.height;
+            viewbox-width: 56; viewbox-height: 30;
+            stroke: T.line; stroke-width: 1px; stroke-line-cap: butt;
+            commands: "M0.5 0 L0.5 30 M5.5 0 L5.5 30 M10.5 0 L10.5 30 M15.5 0 L15.5 30 M20.5 0 L20.5 30 M25.5 0 L25.5 30 M30.5 0 L30.5 30 M35.5 0 L35.5 30 M40.5 0 L40.5 30 M45.5 0 L45.5 30 M50.5 0 L50.5 30 M55.5 0 L55.5 30";
+        }
+    }
+    if !root.on: Text {
+        x: parent.width - 9px - self.width; y: (parent.height - self.height) / 2 - 1px;
+        text: "z"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; font-weight: 800; color: T.mute;
+    }
+    Rectangle { x: -0.75px; y: -0.75px; width: parent.width + 1.5px; height: parent.height + 1.5px; border-width: 1.5px; border-color: T.ink; border-radius: 15.75px; background: transparent; }
+}
+
+// The knob sits on top of the switch without clipping (it overflows the track by design)
+export component CatSwitchFull inherits Rectangle {
+    in property <bool> on;
+    in property <bool> hover;
+    out property <length> knob-x: knob.x;
+    out property <float> knob-angle: knob.motion-angle;
+    out property <float> knob-y: knob.motion-y;
+    out property <float> fill-progress: track.fill-progress;
+    width: 56px; height: 30px;
+    motion := SwitchMotion { on: root.on; bounce: true; }
+    track := CatSwitch { x: 0; y: 0; on: root.on; }
+    // Mac：轨道立刻换色，猫头先保持旧表情（闭眼/睁眼），约 150 ms 交叉淡入新表情，同时带回弹滑过去。
+    private property <float> f0: -100000;
+    private property <bool> fading;
+    private property <float> fclock: root.fading ? animation-tick() / 1ms : 1000000000;
+    private property <float> fade: T.reduce-motion ? 1 : Math.clamp((root.fclock - root.f0) / 150, 0, 1);
+    changed on => { self.f0 = animation-tick() / 1ms; self.fading = true; }
+    Timer { interval: 16ms; running: root.fading; triggered => { if (animation-tick() / 1ms - root.f0 >= 170) { root.fading = false; } } }
+    if root.fade < 1: Knob {
+        x: 24px * motion.value; y: 0px;
+        on: !root.on; hover: root.hover;
+        opacity: 1 - root.fade;
+    }
+    knob := Knob {
+        x: 24px * motion.value;  // .offset(x: isOn ? 24 : 0)
+        y: 0px;                  // 28 px knob centred in 30 px, then .offset(y: -1)
+        on: root.on; hover: root.hover;
+        opacity: root.fade;
+    }
+}
+
+// segmentedRow: 12 pt mono, padding 11, 30 px tall, active = ink; 1.5 px stroke clipped
+// to the 4 px rounded shape (so .75 px shows), no dividers and no transition.
+export component Seg inherits Rectangle {
+    in property <[string]> items;
+    in property <int> selected;
+    in property <length> item-pad: 11px;
+    in property <length> seg-height: 30px;
+    in property <bool> stretch: false;
+    in property <duration> transition-duration: 0ms;
+    in property <int> force-hover: -1;
+    callback picked(int);
+    border-radius: 4px;
+    clip: true;
+    height: root.seg-height;
+    HorizontalLayout {
+        for it[i] in root.items: Rectangle {
+            horizontal-stretch: root.stretch ? 1 : 0;
+            background: i == root.selected ? T.ink : transparent;
+            HorizontalLayout {
+                padding-left: root.item-pad; padding-right: root.item-pad;
+                Text {
+                    text: it; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt;
+                    font-weight: i == root.selected ? 700 : 400;
+                    color: i == root.selected ? T.bg : T.ink;
+                    horizontal-alignment: center; vertical-alignment: center;
+                }
+            }
+            TouchArea { mouse-cursor: pointer; clicked => { root.picked(i); } }
+        }
+    }
+    Rectangle { border-width: 0.75px; border-color: T.ink; border-radius: 4px; }
+}
+
+// policyBadge: 12 pt mono, padding 6/1. DIRECT = 1 px outline + direct icon; REJECT =
+// dashed [3,2] outline + mouse icon; proxy = filled ink. Outlines are centred strokes.
+export component Pol inherits Rectangle {
+    in property <int> kind;   // 0 proxy, 1 direct, 2 reject
+    in property <string> text;
+    height: pl.preferred-height;
+    background: root.kind == 0 ? T.ink : transparent;
+    if root.kind == 1: Rectangle { x: -0.5px; y: -0.5px; width: parent.width + 1px; height: parent.height + 1px; border-width: 1px; border-color: T.ink; }
+    if root.kind == 2: DashBox { x: -0.5px; y: -0.5px; width: parent.width + 1px; height: parent.height + 1px; thick: 1px; dash: 3px; gap: 2px; }
+    pl := HorizontalLayout {
+        padding-left: 6px; padding-right: 6px; padding-top: 1px; padding-bottom: 1px; spacing: 4px;
+        if root.kind == 1: VerticalLayout { alignment: center; Icon { name: "direct"; width: 12px; height: 12px; stroke: 2; tint: T.ink; } }
+        if root.kind == 2: VerticalLayout { alignment: center; Icon { name: "mouse"; width: 12px; height: 12px; stroke: 2; tint: T.ink; } }
+        Text {
+            text: root.text; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt;
+            color: root.kind == 0 ? T.bg : T.ink; vertical-alignment: center;
+        }
+    }
+}
+
+// Underlined text field with placeholder (.srch / .imp input / .frin input)
+export component Field inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <length> font-size: 12px;
+    in property <length> line-thick: 1.5px;
+    in property <bool> dashed: false;
+    in property <TextHorizontalAlignment> align: left;
+    in property <int> max-len: 0;
+    in property <bool> bold: false;
+    in property <bool> numeric: false;
+    in property <bool> read-only: false;
+    out property <bool> focused: ti.has-focus;
+    callback edited(string);
+    callback accepted(string);
+    public function focus-field() { ti.focus(); }
+    ti := TextInput {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height - root.line-thick;
+        text <=> root.text;
+        font-family: T.mono; font-size: root.font-size; letter-spacing: root.font-size * T.mt; font-weight: root.bold ? 700 : 400;
+        color: T.ink;
+        single-line: true;
+        read-only: root.read-only;
+        horizontal-alignment: root.align;
+        vertical-alignment: center;
+        input-type: root.numeric ? InputType.number : InputType.text;
+        selection-background-color: T.ink;
+        selection-foreground-color: T.bg;
+        edited => {
+            root.edited(self.text);
+        }
+        accepted => { root.accepted(self.text); }
+    }
+    if root.text == "": Text {
+        x: 0; y: 0; width: root.width; height: root.height - root.line-thick;
+        text: root.placeholder; font-family: T.mono; font-size: root.font-size; letter-spacing: root.font-size * T.mt; color: T.mute;
+        horizontal-alignment: root.align; vertical-alignment: center;
+    }
+    if !root.dashed || ti.has-focus: Rectangle { x: 0; y: root.height - root.line-thick; width: root.width; height: root.line-thick; background: T.ink; }
+    if root.dashed && !ti.has-focus: DashH { x: 0; y: root.height - root.line-thick; width: root.width; thick: root.line-thick; dash: 4px; gap: 3px; }
+}
+
+// .gtabs — small pressed-tabs
+export component GTabs inherits HorizontalLayout {
+    in property <[string]> items;
+    in property <int> selected;
+    in property <length> fsize: 12px;
+    callback picked(int);
+    spacing: 2px;
+    alignment: start;
+    for it[i] in root.items: Rectangle {
+        border-radius: 3px;
+        background: i == root.selected ? T.ink : transparent;
+        HorizontalLayout {
+            padding-left: 8px; padding-right: 8px; padding-top: 3px; padding-bottom: 3px;
+            Text { text: it; font-family: T.mono; font-size: root.fsize; letter-spacing: root.fsize * T.mt; color: i == root.selected ? T.bg : T.mute; vertical-alignment: center; }
+        }
+        TouchArea { mouse-cursor: pointer; clicked => { root.picked(i); } }
+    }
+}

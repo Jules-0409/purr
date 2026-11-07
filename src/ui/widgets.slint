@@ -1,0 +1,207 @@
+// SPDX-License-Identifier: GPL-3.0-only
+import { CatIcon, IconClock } from "icon.slint";
+export { CatIcon, IconClock } from "icon.slint";
+
+import { Theme } from "tokens.slint";
+export { Theme } from "tokens.slint";
+import { Face } from "faces.slint";
+import { Knob } from "knob.slint";
+export component Txt inherits Text {
+    color: Theme.ink;
+    font-size: 13px;
+    vertical-alignment: center;
+    animate color { duration: 500ms; }
+}
+export component Mono inherits Txt { font-family: Theme.mono; font-size: 12px; }
+export component Label inherits Mono {
+    font-size: 11px;
+    letter-spacing: 1.76px;
+    color: Theme.mute;
+}
+export component RuleLine inherits Rectangle {
+    x: 0px; y: 0px;
+    height: 1.5px;
+    background: Theme.ink;
+}
+export component Btn inherits Rectangle {
+    in property <bool> enabled: true;
+    horizontal-stretch: 0;
+    preferred-width: button-label.preferred-width + 12px + (root.bracket ? 28px : 0px) + (root.icon != "" ? 20px : 0px);
+    min-width: self.preferred-width;
+    in property <string> label;
+    in property <string> icon: "";
+    in property <bool> active: false;
+    in property <bool> bracket: true;
+    callback clicked();
+    height: 28px;
+    border-radius: 3px;
+    background: touch.has-hover || active ? Theme.ink : transparent;
+    HorizontalLayout {
+        x: 0px; y: 0px; width: 100%; height: 100%;
+        padding-left: 6px; padding-right: 6px; spacing: 6px; alignment: center;
+        if root.bracket: Mono { text: "["; color: touch.has-hover || root.active ? Theme.bg : Theme.ink; }
+        if root.icon != "": CatIcon { kind: root.icon; hovered: touch.has-hover; width: 14px; height: 14px; tint: touch.has-hover || root.active ? Theme.bg : Theme.ink; }
+        button-label := Mono { text: root.label; font-weight: 600; color: touch.has-hover || root.active ? Theme.bg : Theme.ink; }
+        if root.bracket: Mono { text: "]"; color: touch.has-hover || root.active ? Theme.bg : Theme.ink; }
+    }
+    touch := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+export component ModeBtn inherits Rectangle {
+    horizontal-stretch: 0;
+    preferred-width: mode-label.preferred-width + 14px + (root.icon != "" ? 19px : 0px);
+    min-width: self.preferred-width;
+    in property <string> label;
+    in property <string> icon: "";
+    in property <bool> active;
+    callback clicked();
+    height: 22px; border-radius: 3px;
+    background: active ? Theme.ink : transparent;
+    HorizontalLayout {
+        x: 0px; y: 0px; width: 100%; height: 100%;
+        padding-left: 7px; padding-right: 7px; spacing: 5px; alignment: center;
+        if root.icon != "": CatIcon { kind: root.icon; awake: root.active; hovered: mode-touch.has-hover; width: 14px; height: 14px; tint: root.active ? Theme.bg : Theme.mute; }
+        mode-label := Mono { text: root.label; font-size: 11.5px; color: root.active ? Theme.bg : Theme.mute; }
+    }
+    mode-touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+export component CatFace inherits Rectangle {
+    in property <bool> awake: false;
+    in property <string> expression: "";
+    in property <color> tint: Theme.ink;
+    if root.expression != "": Face {x: 0px; y: 0px; width: root.width; height: root.height; kind: root.expression == "core" ? "port" : root.expression;}
+    if root.expression == "": Rectangle {
+        x: 0px; y: 0px; width: 100%; height: 100%;
+        Path {
+            width: 100%; height: 100%; viewbox-width: 24; viewbox-height: 24;
+            commands: "M5 9.6 L5.4 3.8 L9.9 7.1 A10 10 0 0 1 14.1 7.1 L18.6 3.8 L19 9.6 C20.3 11.1 21 12.8 21 14.5 C21 18.5 17 20.5 12 20.5 C7 20.5 3 18.5 3 14.5 C3 12.8 3.7 11.1 5 9.6 Z";
+            fill: Theme.bg; stroke: root.tint; stroke-width: root.width / 24 * 1.4; stroke-line-join: round;
+        }
+        Path {
+            width: 100%; height: 100%; viewbox-width: 24; viewbox-height: 24;
+            commands: root.awake ? "M7.5 13.4 A1.3 1.3 0 1 0 10.1 13.4 A1.3 1.3 0 1 0 7.5 13.4 Z M13.9 13.4 A1.3 1.3 0 1 0 16.5 13.4 A1.3 1.3 0 1 0 13.9 13.4 Z" : "M7.6 13.4 Q8.8 14.7 10 13.4 M14 13.4 Q15.2 14.7 16.4 13.4 M11.2 16.6 H12.8";
+            fill: root.awake ? root.tint : transparent; stroke: root.awake ? transparent : root.tint; stroke-width: root.width / 24 * 1.4; stroke-line-cap: round;
+        }
+    }
+}
+export component CatSwitch inherits Rectangle {
+    in property <bool> on;
+    width: 56px; height: 30px; border-width: 1.5px; border-color: Theme.ink;
+    border-radius: 15px; background: on ? Theme.ink : transparent;
+    clip: true;
+    if !root.on: Path {
+        width: parent.width; height: parent.height;
+        viewbox-width: 56; viewbox-height: 30;
+        stroke: Theme.line; stroke-width: 1px; stroke-line-cap: butt;
+        commands: "M5.5 6 L5.5 24 M10.5 2.5 L10.5 27.5 M15.5 2 L15.5 28 M20.5 2 L20.5 28 M25.5 2 L25.5 28 M30.5 2 L30.5 28 M35.5 2 L35.5 28 M40.5 2 L40.5 28 M45.5 2.5 L45.5 27.5 M50.5 6 L50.5 24";
+    }
+    Mono { x: 37px; y: 5px; text: root.on ? "" : "z"; font-weight: 800; color: Theme.mute; }
+    Knob { x: root.on ? 25.5px : 1.5px; y: 0.5px; width: 28px; height: 28px; on: root.on; animate x { duration: IconClock.reduced ? 0ms : 500ms; easing: cubic-bezier(0.35,1.7,0.5,1); } }
+}
+export component SettingRow inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> icon;
+    in-out property <bool> on;
+    callback toggled();
+    height: 72px;
+    CatIcon { x: 0px; y: 24px; kind: root.icon; hovered: row-touch.has-hover; width: 24px; height: 24px; tint: Theme.ink; awake: Theme.awake; }
+    Txt { x: 42px; y: 18px; width: parent.width - 112px; height: 20px; text: root.title; font-size: 15px; font-weight: 700; }
+    Txt { x: 42px; y: 40px; width: parent.width - 112px; height: 16px; text: root.subtitle; font-size: 12px; color: Theme.mute; overflow: elide; }
+    CatSwitch { x: parent.width - self.width; y: 21px; on: root.on; }
+    Rectangle { y: parent.height - 1px; height: 1px; width: 100%; background: Theme.line; }
+    row-touch := TouchArea { mouse-cursor: pointer; clicked => { root.on = !root.on; root.toggled(); } }
+}
+export component Segment inherits Rectangle {
+    in property <[string]> items;
+    in-out property <int> selected;
+    callback changed(int);
+    height: 32px; border-width: 1.5px; border-color: Theme.ink; border-radius: 4px;
+    HorizontalLayout {
+        width: 100%; height: 100%; spacing: 0px; padding: 1.5px;
+        for item[i] in root.items: Rectangle {
+            background: root.selected == i ? Theme.ink : transparent;
+            if i > 0: Rectangle { x: 0px; y: 0px; width: 1px; height: 100%; background: Theme.ink; }
+            HorizontalLayout { x: 0px; y: 0px; width: 100%; height: 100%; padding-left: 10px; padding-right: 10px; alignment: center;
+                Mono { text: item; color: root.selected == i ? Theme.bg : Theme.ink; font-weight: root.selected == i ? 700 : 400; }
+            }
+            TouchArea { mouse-cursor: pointer; clicked => { root.selected = i; root.changed(i); } }
+        }
+    }
+}
+export component Field inherits Rectangle {
+    in property <bool> enabled: true;
+    in property <bool> request-focus: false;
+    changed request-focus => { if self.request-focus { input.focus(); } }
+    in property <string> placeholder;
+    in-out property <string> text;
+    callback edited(string);
+    callback accepted();
+    callback committed();
+    height: 30px;
+    if root.text == "": Mono { text: root.placeholder; color: Theme.mute; width: 100%; height: parent.height - 1.5px; overflow: elide; }
+    input := TextInput {
+        enabled: root.enabled;
+        width: 100%; height: parent.height - 1.5px; single-line: true;
+        vertical-alignment: center;
+        text <=> root.text; color: Theme.ink; font-family: Theme.mono; font-size: 12px;
+        edited => { root.edited(self.text); } accepted => { root.accepted(); root.committed(); }
+        changed has-focus => { if !self.has-focus {root.committed();} }
+    }
+    RuleLine { y: parent.height - 1.5px; width: 100%; }
+}
+export component Metric inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <string> unit;
+    in property <string> detail;
+    in property <bool> line: true;
+    VerticalLayout { alignment: center; spacing: 3px;
+        width: 100%; height: 100%;
+        Label { text: root.label; }
+        HorizontalLayout { alignment: start; spacing: 5px;
+            Mono { text: root.value; font-size: 30px; font-weight: 700; letter-spacing: -0.9px; }
+            Mono { text: root.unit; font-size: 12px; color: Theme.mute; }
+        }
+        Mono { text: root.detail; font-size: 11px; color: Theme.mute; overflow: elide; }
+    }
+    if root.line: Rectangle { y: parent.height - 1px; width: 100%; height: 1px; background: Theme.line; }
+}
+export component SubCard inherits Rectangle {
+    in property <bool> enabled: true;
+    in property <string> title;
+    in property <string> detail;
+    in property <string> used;
+    in property <string> total;
+    in property <float> fraction;
+    in property <string> expiry;
+    in property <bool> active: false;
+    in property <bool> expired: false;
+    callback update();
+    callback use-sub();
+    height: 134px;
+    RuleLine { width: 100%; }
+        VerticalLayout { x: 0px; y: 32px; width: 320px; height: 64px; alignment: start; spacing: 6px;
+            Txt { text: root.title; font-size: 30px; font-weight: 900; letter-spacing: -0.6px; }
+            Mono { text: root.detail; font-size: 11.5px; color: Theme.mute; }
+        }
+        VerticalLayout { x: 352px; y: 25px; width: max(60px,root.width - 584px); height: 84px; alignment: start; spacing: 12px;
+            HorizontalLayout { height: 46px; alignment: start; spacing: 6px;
+                Mono { text: root.used; font-size: 40px; font-weight: 700; letter-spacing: -1.6px; }
+                Mono { text: "/ " + root.total + " GB"; font-size: 14px; color: Theme.mute; }
+            }
+            Rectangle { min-width: 0px; height: 14px; width: 100%;
+                for i in 100: Rectangle { x: i * 6px; width: 2px; height: 100%; background: Theme.line; visible: self.x < parent.width; }
+                Rectangle { x: 0px; y: 0px; width: parent.width * root.fraction; height: 100%; background: Theme.ink; }
+                clip: true;
+            }
+        }
+        VerticalLayout { x: root.width - 200px; y: 24px; width: 200px; height: 86px; alignment: start; spacing: 6px;
+            Mono { text: root.expired ? "已过期" : root.active ? "使用中" : ""; horizontal-alignment: right; font-size: 11px; }
+            Mono { text: "到期 " + root.expiry; color: Theme.mute; horizontal-alignment: right; font-size: 11.5px; }
+            HorizontalLayout { height: 28px; alignment: end; spacing: 12px;
+                if !root.active: Btn { label: "使用"; enabled: root.enabled; clicked => { root.use-sub(); } }
+                Btn { label: "更新"; enabled: root.enabled; icon: "upd"; clicked => { root.update(); } }
+                if root.active: Btn { label: "编辑"; enabled: root.enabled; clicked => { root.use-sub(); } }
+            }
+        }
+}

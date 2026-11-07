@@ -1,0 +1,50 @@
+export global Theme {
+    in-out property <string> mono: "Menlo";
+    // extra letter-spacing (em) so the mono face advances like SF Mono (0.619 em); Menlo is 0.602 em
+    in-out property <float> mono-track: 0.017;
+    in-out property <string> sans: "System Font";
+    in-out property <string> shortcut: "⌘";
+    in-out property <bool> awake: false;
+    in-out property <bool> dark: false;
+    in-out property <string> mode: "rule";
+    in-out property <bool> trouble: false;
+    out property <color> target-sleep: dark ? #15131B : #E7E5ED;
+    out property <color> target-warm: trouble ? #E9A88A : mode == "global" ? #FF6B3D : mode == "direct" ? #FFD2AE : #FF8A4C;
+    out property <color> target-bg: awake ? target-warm : target-sleep;
+    out property <color> target-ink: awake ? #1F120A : dark ? #EEECF4 : #1C1926;
+    out property <color> target-mute: awake ? #1F120ABD : dark ? #EEECF494 : #1C19268F;
+    out property <color> target-line: awake ? #1F120A33 : dark ? #EEECF429 : #1C192629;
+    in-out property <color> sleep-bg: target-sleep;
+    in-out property <color> warm: target-warm;
+    in-out property <color> bg: target-bg;
+    in-out property <color> ink: target-ink;
+    in-out property <color> mute: target-mute;
+    in-out property <color> line: target-line;
+}
+
+export global IconClock { in-out property <float> time: 0; in-out property <bool> awake: false; in-out property <bool> reduced: false; }
+
+export component ThemeMotion inherits Rectangle {
+    width: 0px; height: 0px;
+    private property <color> tone-sleep: Theme.target-sleep;
+    private property <color> tone-warm: Theme.target-warm;
+    private property <color> tone-bg: Theme.target-bg;
+    private property <color> tone-ink: Theme.target-ink;
+    private property <color> tone-mute: Theme.target-mute;
+    private property <color> tone-line: Theme.target-line;
+    animate tone-sleep, tone-warm, tone-bg, tone-ink, tone-mute, tone-line {
+        // PurrTheme.current switches immediately on macOS; the flood circle is the only transition.
+        duration: 0ms;
+    }
+    init => {
+        Theme.sleep-bg = root.tone-sleep; Theme.warm = root.tone-warm;
+        Theme.bg = root.tone-bg; Theme.ink = root.tone-ink;
+        Theme.mute = root.tone-mute; Theme.line = root.tone-line;
+    }
+    changed tone-sleep => { Theme.sleep-bg = root.tone-sleep; }
+    changed tone-warm => { Theme.warm = root.tone-warm; }
+    changed tone-bg => { Theme.bg = root.tone-bg; }
+    changed tone-ink => { Theme.ink = root.tone-ink; }
+    changed tone-mute => { Theme.mute = root.tone-mute; }
+    changed tone-line => { Theme.line = root.tone-line; }
+}

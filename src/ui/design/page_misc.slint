@@ -1,0 +1,354 @@
+import { ListView } from "std-widgets.slint";
+// 订阅 / 连接 / 规则 / 习惯
+import { T, Anim } from "theme.slint";
+import { S, ConnRow, RuleRow, LogRow } from "state.slint";
+import { Icon } from "icons.slint";
+import { Face } from "faces.slint";
+import { Lbl, Bk, DashBox, DashH, Stripes, Field, GTabs, Pol, Seg, CatSwitchFull, CatSwitch, Knob } from "widgets.slint";
+import { PageHead, HeadSlot, EmptyState, MNote } from "page_px.slint";
+
+component VCenter inherits VerticalLayout { alignment: center; horizontal-stretch: 0; }
+
+// ------------------------------------------------------------------ 订阅
+// SubsPageView row: HStack(spacing 32), padding-vertical 24, 1.5 px rule on top.
+// (Double-click the name to edit the URL; macOS has no visible 编辑 button.)
+component SubRow inherits Rectangle {
+    in property <string> id;
+    in property <string> name;
+    in property <string> info;
+    in property <string> used;
+    in property <string> total;
+    in property <float> pct;
+    in property <bool> tag;
+    in property <bool> expired;
+    in property <string> exp;
+    in property <bool> primary;
+    in property <bool> last-row: false;
+    height: 118px;
+    Rectangle { x: 0; y: 0; width: parent.width; height: 1.5px; background: T.ink; }
+    if root.last-row: Rectangle { x: 0; y: parent.height; width: parent.width; height: 1.5px; background: T.ink; }
+    HorizontalLayout {
+        x: 0; y: 24px; width: parent.width; height: 70px; spacing: 32px;
+        VCenter { width: 300px; spacing: 6px;
+            Text { text: root.name; font-family: T.sans; font-size: 30px; font-weight: 900; color: T.ink; height: 36px; vertical-alignment: center; overflow: elide;
+                TouchArea { double-clicked => { S.action("edit-id", root.id); } } }
+            Text { text: root.info; font-family: T.mono; font-size: 11.5px; letter-spacing: 11.5px * T.mt; color: T.mute; height: 14px; vertical-alignment: center; }
+        }
+        VCenter { horizontal-stretch: 1; spacing: 12px;
+            Rectangle { height: 48px;
+                ut := Text { x: 0; y: 0; height: 47px; text: root.used; font-family: T.mono; font-size: 40px; letter-spacing: 40px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: top; }
+                Text { x: ut.preferred-width + 6px; y: 24.4px; height: 17px; text: root.total; font-family: T.mono; font-size: 14px; letter-spacing: 14px * T.mt; font-weight: 500; color: T.mute; vertical-alignment: top; }
+            }
+            Rectangle { height: 10px;
+                Rectangle { x: -0.75px; y: -0.75px; width: parent.width + 1.5px; height: parent.height + 1.5px; border-width: 1.5px; border-color: T.ink; }
+                Rectangle { x: 0; y: 0; width: parent.width * Math.min(100, Math.max(0, root.pct)) / 100; height: parent.height; background: T.ink; }
+            }
+        }
+        VCenter { width: 200px; spacing: 6px;
+            if root.tag: HorizontalLayout { alignment: end;
+                Rectangle { height: 17.2px;
+                    background: T.ink;
+                    HorizontalLayout { padding-left: 6px; padding-right: 6px;
+                        Text { text: root.expired ? "已过期" : "使用中"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.bg; vertical-alignment: center; }
+                    }
+                }
+            }
+            Text { text: "到期 " + root.exp; font-family: T.mono; font-size: 11.5px; letter-spacing: 11.5px * T.mt; color: T.mute; horizontal-alignment: right; height: 14px; vertical-alignment: center; }
+            HorizontalLayout { alignment: end; spacing: 12px;
+                if !root.primary: Bk { text: "使用"; clicked => { S.action("use-id", root.id); } }
+                Bk { text: S.importing && root.primary ? "更新中…" : "更新"; icon: "upd"; clicked => { S.action("update-id", root.id); } }
+            }
+        }
+    }
+}
+
+export component SubsPage inherits Rectangle {
+    property <length> button-x: imp-btn.absolute-position.x + imp-btn.width / 2;
+    property <length> button-y: imp-btn.absolute-position.y + imp-btn.height / 2;
+    changed button-x => { S.import-x = self.button-x; }
+    changed button-y => { S.import-y = self.button-y; }
+    PageHead { x: 0; y: 0; width: parent.width; title: "订阅"; sub: "毛线团";
+        Rectangle { horizontal-stretch: 1; }
+        HorizontalLayout { spacing: 12px; horizontal-stretch: 0;
+            if S.editing-id != "": HeadSlot { Bk { text: "取消"; clicked => { S.action("cancel-edit", ""); } } }
+            HeadSlot { dy: 15.4px; sub-f := Field { width: 340px; height: 24.3px; text <=> S.import-url; read-only: S.importing; placeholder: "粘贴订阅链接 https://…"; accepted => { S.do-import(); } } }
+            HeadSlot { imp-btn := Bk { text: S.importing ? "闻一闻…" : S.editing-id != "" ? "保存" : "导入"; icon: "imp"; clicked => { S.do-import(); } } }
+        }
+    }
+    // SubsEmptyGuideView: VStack(spacing 10), padding-top 56
+    if S.subscriptions.length == 0: Rectangle {
+        x: 0; y: 40.8px + 20px; width: parent.width; height: parent.height - self.y;
+        guide := VerticalLayout {
+            x: 0; y: 56px; width: parent.width; spacing: 10px; alignment: start;
+            HorizontalLayout { alignment: center; padding-bottom: 6px; Icon { name: "sb"; width: 44px; height: 44px; stroke: 1.6; tint: T.mute; eyes-open: false; } }
+            Text { text: "还没有毛线团"; font-family: T.sans; font-size: 24px; font-weight: 900; color: T.ink; horizontal-alignment: center; height: 28px; vertical-alignment: center; }
+            HorizontalLayout { alignment: center; spacing: 8px; height: 16.8px;
+                Text { text: "粘贴订阅链接"; font-family: T.sans; font-size: 14px; font-weight: 700; color: T.ink; vertical-alignment: center; }
+                Text { text: "→"; font-family: T.sans; font-size: 14px; color: T.ink; vertical-alignment: center; }
+                Text { text: "导入"; font-family: T.sans; font-size: 14px; font-weight: 700; color: T.ink; vertical-alignment: center; }
+            }
+            Text { text: "在右上角或下方输入机场提供的订阅地址（Clash / 通用订阅），即可读取全部窝点。"; font-family: T.sans; font-size: 12px; color: T.mute; horizontal-alignment: center; height: 15px; vertical-alignment: center; }
+            HorizontalLayout { alignment: center; spacing: 12px; padding-top: 14px; height: 14px + 32px;
+                VCenter { Field { width: 440px; height: 24.3px; text <=> S.import-url; read-only: S.importing; placeholder: "粘贴订阅链接 https://…"; accepted => { S.do-import(); } } }
+                VCenter {
+                    Rectangle { background: T.ink; border-radius: 4px; height: 32px;
+                        HorizontalLayout { padding-left: 16px; padding-right: 16px; spacing: 6px;
+                            VCenter { Icon { name: "imp"; width: 14px; height: 14px; stroke: 1.9; tint: T.bg; eyes-open: true; } }
+                            Text { text: S.importing ? "闻一闻…" : "导入"; font-family: T.sans; font-size: 12.5px; font-weight: 700; color: T.bg; vertical-alignment: center; }
+                        }
+                        TouchArea { mouse-cursor: pointer; clicked => { S.do-import(); } }
+                    }
+                }
+            }
+            HorizontalLayout { alignment: center; spacing: 6px; padding-top: 4px; height: 4px + 14.4px;
+                Text { text: "也可以"; font-family: T.sans; font-size: 12px; color: T.mute; vertical-alignment: center; }
+                Rectangle { width: p1.preferred-width;
+                    p1 := Text { width: parent.width; height: parent.height; text: "从剪贴板粘贴并导入"; font-family: T.sans; font-size: 12px; font-weight: 700; color: T.ink; vertical-alignment: center; }
+                    Rectangle { x: 0; y: parent.height - 1.5px; width: parent.width; height: 1px; background: T.ink; }
+                    TouchArea { mouse-cursor: pointer; clicked => { S.action("paste", ""); } }
+                }
+            }
+        }
+        Rectangle { x: 0; y: guide.y + guide.preferred-height + 20px; width: parent.width; height: 1.5px; background: T.ink; }
+    }
+    if S.subscriptions.length > 0: ListView {
+        x: 0; y: 40.8px + 20px; width: parent.width; height: parent.height - self.y;
+        for row[idx] in S.subscriptions: SubRow {
+            id: row.id; name: row.title; info: row.detail; used: row.used; total: "/ " + row.total + " GB";
+            pct: row.fraction * 100; tag: row.active || row.expired; expired: row.expired; exp: row.expiry;
+            primary: row.active; last-row: idx == S.subscriptions.length - 1;
+        }
+    }
+}
+
+// ------------------------------------------------------------------ 连接
+component Th inherits Text {
+    font-family: T.mono; font-size: 10.5px; letter-spacing: 1.5px + 10.5px * T.mt; color: T.mute; font-weight: 500;
+    vertical-alignment: center;
+}
+
+// liveTable row: HStack (default 8 px spacing), 12 pt mono, padding-vertical 8, 1 px rule
+component ConnLine inherits Rectangle {
+    in property <ConnRow> c;
+    height: 33px; // measured: macOS rows repeat every 66 px at 2x
+    Rectangle { x: 0; y: parent.height - 1px; width: parent.width; height: 1px; background: T.line; }
+    HorizontalLayout { height: parent.height; spacing: 8px;
+        Text { width: 240px; text: root.c.host; font-family: T.sans; font-size: 13px; font-weight: 600; color: T.ink; vertical-alignment: center; overflow: elide; }
+        Text { width: 110px; text: root.c.app; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; color: T.ink; vertical-alignment: center; overflow: elide; }
+        Text { width: 170px; text: root.c.rule; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; color: T.mute; vertical-alignment: center; overflow: elide; }
+        HorizontalLayout { width: 220px; alignment: start; VCenter { Pol { kind: root.c.kind; text: root.c.policy; } } }
+        Rectangle { horizontal-stretch: 1; }
+        Text { width: 90px; text: root.c.down; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; color: T.ink; horizontal-alignment: right; vertical-alignment: center; }
+        Text { width: 90px; text: root.c.up; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; color: T.ink; horizontal-alignment: right; vertical-alignment: center; }
+        Text { width: 70px; text: root.c.age; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; color: T.ink; horizontal-alignment: right; vertical-alignment: center; }
+        Rectangle { width: 36px;
+            Icon {
+                x: parent.width - 13px; y: (parent.height - 13px) / 2;
+                name: "cut"; width: 13px; height: 13px; stroke: 2; tint: T.ink; hover: xa.has-hover;
+            }
+            xa := TouchArea { x: parent.width - 17px; width: 17px; mouse-cursor: pointer; clicked => { S.cut(root.c.id); } }
+        }
+    }
+}
+
+export component ConnsPage inherits Rectangle {
+    PageHead { x: 0; y: 0; width: parent.width; title: "连接"; sub: "";
+        HeadSlot { GTabs { items: ["实时", "爪印 · 日志"]; selected: S.cn-tab; picked(i) => { S.cn-pick(i); } } }
+        Rectangle { horizontal-stretch: 1; }
+        if S.cn-tab == 0: HorizontalLayout { spacing: 16px; horizontal-stretch: 0;
+            HeadSlot { dy: 16.4px; Field { width: 260px; height: 22.3px; placeholder: "搜索域名 / 应用 / 规则 / 窝点"; edited(t) => { S.cn-query(t); } } }
+            HeadSlot { Bk { text: "全部断开"; icon: "cut"; clicked => { S.cut-all(); } } }
+        }
+        if S.cn-tab == 1: HorizontalLayout { spacing: 16px; horizontal-stretch: 0;
+            HeadSlot { GTabs { items: ["全部", "呼噜", "警告"]; selected: S.lv; picked(i) => { S.lv-pick(i); } } }
+            HeadSlot { Bk { text: "清空"; icon: ""; clicked => { S.log-clear(); } } }
+        }
+    }
+    if S.cn-tab == 0: VerticalLayout {
+        height: parent.height - self.y;
+        x: 0; y: 40.8px + 14px; width: parent.width; alignment: start;
+        Rectangle { height: 12.6px + 8px;
+            HorizontalLayout { y: 0px; height: 12.6px; spacing: 8px;
+                Th { width: 240px; text: "HOST"; }
+                Th { width: 110px; text: "APP"; }
+                Th { width: 170px; text: "RULE"; }
+                Th { width: 220px; text: "CHAIN"; }
+                Rectangle { horizontal-stretch: 1; }
+                Th { width: 90px; text: "DOWN"; horizontal-alignment: right; }
+                Th { width: 90px; text: "UP"; horizontal-alignment: right; }
+                Th { width: 70px; text: "AGE"; horizontal-alignment: right; }
+                Rectangle { width: 36px; }
+            }
+            Rectangle { x: 0; y: parent.height - 1.5px; width: parent.width; height: 1.5px; background: T.ink; }
+        }
+        if S.conns.length > 0: ListView { height: parent.height - 20.6px; for c in S.conns: ConnLine { c: c; } }
+        if S.conns.length == 0: Rectangle { height: 96px;
+            HorizontalLayout { x: 0; y: 36px; height: 24px; spacing: 10px; alignment: start;
+                Icon { name: S.on ? "cn" : "ov"; width: 24px; height: 24px; tint: T.mute; eyes-open: S.on; }
+                Text { text: S.on ? "没有匹配的连接" : "zzz… 它睡着了，没有连接。"; font-family: T.sans; font-size: 14px; color: T.mute; vertical-alignment: center; }
+            }
+        }
+    }
+    // logTerminal: VStack(spacing 6) of 12.5 pt mono rows, padding-top 10 under a 1.5 px rule
+    if S.cn-tab == 1: Rectangle {
+        x: 0; y: 40.8px + 14px; width: parent.width; height: parent.height - self.y; clip: true;
+        Rectangle { x: 0; y: 0; width: parent.width; height: 1.5px; background: T.ink; }
+        ListView {
+            x: 0; y: 10px; width: parent.width;
+            height: min(parent.height - 10px, Math.min(18, S.logs.length) * 21px);
+            for idx in Math.min(18, S.logs.length): Rectangle {
+                property <LogRow> l: S.logs[Math.min(18, S.logs.length) - 1 - idx];
+                height: 21px;
+                HorizontalLayout { y: 0; height: 15px;
+                    Text { width: 86px; text: l.time; font-family: T.mono; font-size: 12.5px; letter-spacing: 12.5px * T.mt; color: T.mute; vertical-alignment: center; }
+                    Rectangle { width: 64px;
+                        lvt := Text { x: 0; height: parent.height; text: l.level; font-family: T.mono; font-size: 12.5px; letter-spacing: 12.5px * T.mt;
+                               font-weight: l.level == "PURR" ? 800 : 400; color: l.level == "INFO" ? T.mute : T.ink; vertical-alignment: center; }
+                        if l.level == "WARN": Rectangle { x: 0; y: parent.height - 2px; width: lvt.preferred-width; height: 1px; background: T.ink; }
+                    }
+                    Text { text: l.message; font-family: T.mono; font-size: 12.5px; letter-spacing: 12.5px * T.mt; color: T.ink; vertical-alignment: center; horizontal-stretch: 1; }
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------------ 规则
+// policy chip: 12 pt mono, padding 6/1, 1 px centred outline, ink fill for proxy groups
+component RuleChip inherits Rectangle {
+    in property <int> tone;
+    in property <string> policy;
+    property <bool> is-outline: root.tone != 0 || root.policy == "DIRECT" || root.policy == "REJECT" || root.policy == "直连" || root.policy == "抓老鼠";
+    property <string> label: (root.tone == 2 || root.policy == "REJECT") ? "抓老鼠" : (root.tone == 1 || root.policy == "DIRECT") ? "直连" : root.policy;
+    height: 16.4px;
+    width: txt.preferred-width + 12px;
+    background: self.is-outline ? transparent : T.ink;
+    Rectangle { x: -0.5px; y: -0.5px; width: parent.width + 1px; height: parent.height + 1px; border-width: 1px; border-color: T.ink; }
+    txt := Text {
+        x: 6px; width: parent.width - 12px; height: parent.height;
+        text: root.label;
+        font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt;
+        color: root.is-outline ? T.ink : T.bg;
+        vertical-alignment: center;
+    }
+}
+
+export component RulesPage inherits Rectangle {
+    PageHead { x: 0; y: 0; width: parent.width; title: "规则"; sub: "猫的规矩";
+        Rectangle { horizontal-stretch: 1; }
+        HorizontalLayout { spacing: 16px; horizontal-stretch: 0;
+            HeadSlot { dy: 16.4px; Field { width: 260px; height: 22.3px; placeholder: "搜索规则"; edited(t) => { S.rl-query(t); } } }
+            HeadSlot { dy: 20.4px; Text { text: S.rule-stat; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; color: T.mute; height: 15px; vertical-alignment: center; } }
+        }
+    }
+    VerticalLayout {
+        x: 0; y: 40.8px + 14px; width: parent.width; height: parent.height - self.y; alignment: stretch; spacing: 14px;
+        Rectangle { height: 12.6px + 8px; vertical-stretch: 0;
+            HorizontalLayout { y: -0.5px; height: 12.6px; spacing: 8px;
+                Th { width: 50px; text: "#"; }
+                Th { width: 190px; text: "TYPE"; }
+                Th { width: 280px; text: "MATCH"; }
+                Th { width: 180px; text: "POLICY"; }
+                Rectangle { horizontal-stretch: 1; }
+                Th { width: 120px; text: "HITS TODAY"; horizontal-alignment: right; }
+            }
+            Rectangle { x: 0; y: parent.height - 1.5px; width: parent.width; height: 1.5px; background: T.ink; }
+        }
+        // Fill the rest of the page (alignment: start left the list at its 2-row preferred height).
+        ListView { vertical-stretch: 1; opacity: S.mode == "rule" ? 1 : 0.3; for r in S.rules: Rectangle { height: 29px; // macOS row pitch 58 px at 2x
+            Rectangle { x: 0; y: parent.height - 1px; width: parent.width; height: 1px; background: T.line; }
+            HorizontalLayout { height: parent.height; spacing: 8px;
+                Text {
+                    width: 50px;
+                    text: (r.index.to-float() > 0 && r.index.to-float() < 10) ? "0" + r.index : r.index;
+                    font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; color: T.mute; vertical-alignment: center;
+                }
+                Text { width: 190px; text: r.kind; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; color: T.ink; vertical-alignment: center; }
+                Text { width: 280px; text: r.payload; font-family: T.sans; font-size: 13px; font-weight: 600; color: T.ink; vertical-alignment: center; overflow: elide; }
+                HorizontalLayout { width: 180px; alignment: start; VCenter { RuleChip { tone: r.tone; policy: r.policy; } } }
+                Rectangle { horizontal-stretch: 1; }
+                Text { width: 120px; text: r.hits; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; color: T.ink; horizontal-alignment: right; vertical-alignment: center; }
+            }
+        } }
+    }
+}
+
+// ------------------------------------------------------------------ 习惯
+// switchRow / segmentedRow: HStack(spacing 14): 22 px icon in a 28 px frame, 15 bold + 12 desc,
+// control; min height 72, 1 px rule. Hovering the row twitches the cat knob.
+component SRow inherits Rectangle {
+    in property <string> icon;
+    in property <string> title;
+    in property <string> desc;
+    in property <bool> on: false;
+    in property <int> sw: -1;      // index for S.switch-toggle, or -1 when the row hosts another control
+    in property <bool> icon-awake: S.on;
+    in property <length> row-height: 72px;
+    in property <bool> force-hover;
+    height: root.row-height;
+    property <bool> hov: ta.has-hover || row-hover.has-hover || root.force-hover;
+    Rectangle { x: 0; y: parent.height - 1px; width: parent.width; height: 1px; background: T.line; }
+    ta := TouchArea { enabled: root.sw >= 0; mouse-cursor: root.sw >= 0 ? MouseCursor.pointer : MouseCursor.default; clicked => { S.switch-toggle(root.sw); } }
+    row-hover := TouchArea { enabled: root.sw < 0; }
+    HorizontalLayout { y: 0; height: root.row-height; spacing: 14px;
+        VCenter { width: 28px; HorizontalLayout { alignment: center; Icon { name: root.icon; width: 22px; height: 22px; tint: T.ink; eyes-open: root.sw >= 0 ? root.on : root.icon-awake; } } }
+        VCenter { horizontal-stretch: 1; spacing: 2px;
+            Text { text: root.title; font-family: T.sans; font-size: 15px; font-weight: 700; color: T.ink; height: 19px; vertical-alignment: center; }
+            Text { text: root.desc; font-family: T.sans; font-size: 12px; color: T.mute; height: 15px; vertical-alignment: center; }
+        }
+        if root.sw >= 0: VCenter { CatSwitchFull { on: root.on; hover: root.hov; } }
+        @children
+    }
+}
+
+component SetHead inherits Rectangle {
+    in property <string> text;
+    height: 12.6px + 8px;
+    Text { x: 0; y: 0; height: 13px; text: root.text; font-family: T.mono; font-size: 10.5px; letter-spacing: 1.6px + 10.5px * T.mt; color: T.mute; font-weight: 500; vertical-alignment: center; }
+    Rectangle { x: 0; y: parent.height - 1.5px; width: parent.width; height: 1.5px; background: T.ink; }
+}
+
+export component SettingsPage inherits Rectangle {
+    property <string> current-port: S.port;
+    property <string> app-version: "0.1.0";
+    changed current-port => { port-field.text = self.current-port; }
+    PageHead { x: 0; y: 0; width: parent.width; title: "习惯"; sub: "它的小脾气";
+        Rectangle { horizontal-stretch: 1; }
+        HorizontalLayout { spacing: 14px; horizontal-stretch: 0;
+            HeadSlot { Bk { text: "复制终端命令"; icon: "head"; clicked => { S.action("copy", ""); } } }
+            HeadSlot { Bk { text: "刷新 DNS"; icon: "head"; clicked => { S.action("flush-dns", ""); } } }
+            HeadSlot { Bk { text: "退出应用"; icon: "cut"; clicked => { S.window-action("quit"); } } }
+        }
+    }
+    HorizontalLayout {
+        x: 0; y: 40.8px + 18px; width: parent.width; spacing: 56px;
+        VerticalLayout { alignment: start; horizontal-stretch: 1;
+            SetHead { text: "HABITS · 习惯"; }
+            SRow { icon: "wake"; title: "醒来就呼噜"; desc: "开机启动，并自动连接"; sw: 0; on: S.auto-wake; }
+            SRow { icon: "swap"; title: "换个窝继续睡"; desc: "窝点断线时，自动换到最暖的窝"; sw: 1; on: S.auto-swap; }
+            SRow { icon: "mouse"; title: "抓老鼠"; desc: "拦截广告与追踪器"; sw: 2; on: S.block-ads; }
+            SRow { icon: "cut"; title: "点关闭按钮时"; desc: "点窗口关闭按钮 (×) 是退到后台托盘，还是直接退出应用";
+                VCenter { Seg { items: ["后台托盘", "直接退出"]; selected: S.close-to-tray ? 0 : 1; picked(i) => { S.close-pick(i); } } }
+            }
+            SRow { icon: "snd"; title: "呼噜声"; desc: "连上 / 断开时呼噜一声，或者一直呼噜";
+                VCenter { Seg { items: ["静音", "一声", "一直"]; selected: S.snd; picked(i) => { S.snd-pick(i); } } }
+            }
+        }
+        VerticalLayout { alignment: start; horizontal-stretch: 1;
+            SetHead { text: "NETWORK · 网络"; }
+            SRow { icon: "port"; title: "混合端口"; desc: "HTTP / SOCKS5 共用一个";
+                VCenter { port-field := Field { width: 76px; height: 27.2px; text: S.port; font-size: 16px; bold: true; align: right; dashed: false; max-len: 5; numeric: true; accepted(t) => { S.action("port", t); } changed focused => { if !self.focused { S.action("port", self.text); } } } }
+            }
+            SRow { icon: "lan"; title: "分享猫窝"; desc: S.lan-d; sw: 3; on: S.allow-lan; }
+            SRow { icon: "v6"; title: "IPv6"; desc: "启用 IPv6 代理"; sw: 4; on: S.ipv6; }
+            SRow { icon: "dns"; title: "DNS"; desc: "加密 DNS（DoH）";
+                VCenter { Seg { items: ["1.1.1.1", "8.8.8.8", "223.5.5.5"]; selected: S.dns; picked(i) => { S.dns-pick(i); } } }
+            }
+            Rectangle { height: 16px; }
+            SetHead { text: "ABOUT · 关于与版本"; }
+            SRow { icon: "ov"; title: "PURR v" + root.app-version; desc: "mihomo 内核 · 原生桌面代理"; row-height: 68px;
+                VCenter { Bk { text: "检查更新"; icon: "upd"; clicked => { S.action("check-update", ""); } } }
+            }
+        }
+    }
+}

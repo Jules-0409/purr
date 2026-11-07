@@ -1,0 +1,55 @@
+[package]
+name = "purr"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "Purr, a lightweight cross-platform mihomo tray client"
+publish = false
+
+[[bin]]
+name = "Purr"
+path = "src/main.rs"
+
+[lib]
+name = "purr_core"
+path = "src/lib.rs"
+crate-type = ["staticlib", "rlib"]
+
+[features]
+default = []
+gpu-renderer = ["slint/renderer-femtovg"]
+
+[dependencies]
+base64 = "0.22"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+getrandom = "0.2"
+muda = { version = "0.21", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+slint = { version = "1.18.1", default-features = false, features = ["compat-1-18", "std", "backend-winit", "renderer-software", "unstable-winit-030"] }
+sysproxy = "0.3"
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "signal", "sync", "time"] }
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "handshake"] }
+tray-icon = { version = "0.26", default-features = false }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+auto-launch = "0.6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSRunningApplication"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[patch.crates-io]
+softbuffer = { path = "vendor/softbuffer" }

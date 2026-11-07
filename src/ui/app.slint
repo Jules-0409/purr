@@ -1,0 +1,268 @@
+// SPDX-License-Identifier: GPL-3.0-only
+import { Palette, ScrollView } from "std-widgets.slint";
+import { Theme, IconClock, ThemeMotion } from "tokens.slint";
+export { Theme, IconClock } from "tokens.slint";
+import { NodeItem, GroupTab, ConnRow, RuleRow, LogRow, SubscriptionRow, TrayNode } from "types.slint";
+export { NodeItem, GroupTab, ConnRow, RuleRow, LogRow, SubscriptionRow, TrayNode, SiteRow } from "types.slint";
+export { TrayWindow } from "tray.slint";
+import { S } from "design/state.slint";
+export { S, AsciiRow } from "design/state.slint";
+export { Anim } from "animation.slint";
+import { TopBar, Band, Tray } from "design/chrome.slint";
+import { OverviewPage, ServiceDetailModal } from "design/page_ov.slint";
+import { NodesPage } from "design/page_px.slint";
+import { SubsPage, ConnsPage, RulesPage, SettingsPage } from "design/page_misc.slint";
+
+export component MainWindow inherits Window {
+    ThemeMotion {}
+    title: "PURR"; preferred-width: 1200px; preferred-height: 760px;
+    icon: @image-url("icons/app-icon.png");
+    min-width: 1000px; min-height: 560px; no-frame: true;
+    background: root.flood-progress >= 1 ? Theme.warm : Theme.sleep-bg; default-font-size: 13px;
+    default-font-family: Theme.sans;
+    out property <bool> os-dark: Palette.color-scheme == ColorScheme.dark;
+    in-out property <bool> awake <=> S.on;
+    in property <bool> preview: false;
+    // Corner radius of the window outline (Windows sets 8px on Windows 11 to follow DWM, 0 when maximized).
+    in property <length> frame-radius: 12px;
+    in-out property <bool> first-run <=> S.first;
+    in-out property <string> trouble <=> S.err;
+    in-out property <string> trouble-title <=> S.tr-h;
+    in-out property <string> trouble-desc <=> S.trouble-desc;
+    in-out property <string> trouble-action <=> S.trouble-action;
+    in-out property <string> trouble-secondary <=> S.trouble-secondary;
+    in-out property <string> trouble-countdown <=> S.tr-cd;
+    in-out property <bool> busy <=> S.importing;
+    in-out property <[SubscriptionRow]> subscriptions <=> S.subscriptions;
+    in-out property <[TrayNode]> tray-nodes <=> S.tray-nodes;
+    in-out property <float> page-progress <=> S.page-t;
+    in property <float> frame-time: 0;
+    in-out property <float> first-shake <=> S.shake;
+    in-out property <bool> first-focus <=> S.first-focus;
+    in-out property <bool> reduced-motion: false;
+    in-out property <int> page <=> S.page;
+    in-out property <int> conn-pane <=> S.cn-tab;
+    in-out property <string> mode <=> S.mode;
+    in-out property <bool> sys-proxy <=> S.sys;
+    in-out property <bool> tun-mode <=> S.tun;
+    in-out property <bool> sound-purr: false;
+    in-out property <bool> holding <=> S.holding;
+    in-out property <float> hold: 0;
+    in-out property <length> ear-x: 100px;
+    in-out property <length> ear-tip-x: 192px;
+    in-out property <length> line-w: 1200px;
+    in-out property <length> line-h: 136px;
+    in-out property <string> line-path <=> S.line-main;
+    in-out property <string> line-warm <=> S.line-hold;
+    in property <string> tip-text: "按住耳朵 / Space 叫醒它";
+    in-out property <string> down-value <=> S.dn;
+    in property <string> down-unit: "MB/s";
+    in-out property <string> up-value <=> S.up;
+    in property <string> up-unit: "MB/s";
+    in-out property <string> elapsed <=> S.tm;
+    in-out property <int> connection-count <=> S.connection-count;
+    in-out property <string> peak-text <=> S.peak;
+    in-out property <string> down-peak <=> S.dn-s;
+    in-out property <string> up-peak <=> S.up-s;
+    in property <string> chart-fill: "M0 0";
+    in-out property <string> chart-down <=> S.chart-dn;
+    in-out property <string> chart-up <=> S.chart-up;
+    in property <string> chart-grid: "M0 0";
+    in-out property <string> chart-max <=> S.chart-max;
+    in-out property <string> chart-mid <=> S.chart-mid;
+    in-out property <length> chart-w: 740px;
+    in-out property <length> chart-h: 170px;
+    in property <string> now-purring-name: "未连接";
+    in property <string> now-purring-desc: "睡着了。醒来后按 分流 走。";
+    in property <string> status-header-text: "STATUS 睡着了 · OFF";
+    in-out property <string> current-node-label <=> S.node-label;
+    in-out property <string> current-group-name <=> S.group-name;
+    in-out property <string> current-node-delay <=> S.node-delay;
+    in property <string> config-path;
+    in-out property <string> mixed-port <=> S.port;
+    in-out property <string> sound-choice <=> S.sound-key;
+    in-out property <string> dns-choice <=> S.dns-key;
+    in-out property <string> exit-ip <=> S.ex-ip;
+    in-out property <string> exit-location <=> S.ex-loc;
+    in-out property <string> total-value <=> S.tot;
+    in-out property <string> total-unit <=> S.total-unit;
+    in-out property <string> total-detail <=> S.tot-s;
+    in-out property <string> memory-value <=> S.mem;
+    in-out property <string> memory-detail <=> S.mem-s;
+    in-out property <float> memory-fraction <=> S.mem-fraction;
+    in-out property <string> conn-detail <=> S.cnt-s;
+    in-out property <float> proxy-fraction <=> S.proxy-fraction;
+    in-out property <string> proxy-detail <=> S.proxy-detail;
+    in-out property <string> direct-detail <=> S.direct-detail;
+    in-out property <string> blocked-detail <=> S.blocked-detail;
+    in-out property <string> sub-name <=> S.subi-n;
+    in-out property <string> sub-detail <=> S.sub-detail;
+    in property <bool> has-subscription: false;
+    in-out property <string> sub-editor-url <=> S.import-url;
+    in-out property <string> editing-subscription <=> S.editing-id;
+    in-out property <[GroupTab]> group-tabs <=> S.routes;
+    in-out property <[NodeItem]> spectrum-nodes <=> S.stems;
+    in property <[NodeItem]> list-nodes;
+    in-out property <[ConnRow]> conns <=> S.conns;
+    in-out property <[RuleRow]> rules <=> S.rules;
+    in-out property <[LogRow]> logs <=> S.logs;
+    in-out property <string> log-filter: "all";
+    in-out property <string> rule-stat <=> S.rule-stat;
+    in-out property <bool> testing-group <=> S.testing;
+    in-out property <int> hover-node: -1;
+    in-out property <string> detail-name <=> S.nd-name;
+    in-out property <string> detail-kind <=> S.nd-sub;
+    in-out property <string> detail-delay <=> S.nd-lat;
+    in-out property <string> detail-jitter <=> S.nd-jit;
+    in-out property <string> detail-loss <=> S.nd-loss;
+    in-out property <string> detail-uptime <=> S.nd-up;
+    in-out property <string> detail-verdict <=> S.vd-b;
+    in-out property <string> detail-note <=> S.vd-s;
+    in-out property <string> detail-spark <=> S.sp-ln;
+    in-out property <string> detail-failures <=> S.sp-x;
+    in-out property <string> detail-alt <=> S.alt-label;
+    in property <length> z1: 0px;
+    in property <length> z2: 0px;
+    in property <length> z3: 0px;
+    in property <length> r1: 0px;
+    in property <length> r2: 0px;
+    in property <length> r3: 0px;
+    in property <length> r4: 0px;
+    in-out property <string> toast-msg <=> S.toast;
+    in-out property <bool> toast-on <=> S.toast-on;
+    in-out property <bool> tray-open <=> S.tray-open;
+    in-out property <bool> auto-wake <=> S.auto-wake;
+    in-out property <bool> auto-swap <=> S.auto-swap;
+    in-out property <bool> block-ads <=> S.block-ads;
+    in-out property <bool> close-to-tray <=> S.close-to-tray;
+    in-out property <bool> allow-lan <=> S.allow-lan;
+    in-out property <bool> ipv6 <=> S.ipv6;
+    out property <float> flood-progress: awake ? 1 : 0;
+    in property <string> flood-path: "M0 0";
+    // PurrStore.stepFrame: 0.55 s smoothstep (p*p*(3-2p) == cubic-bezier(1/3, 0, 2/3, 1)).
+    animate flood-progress { duration: root.reduced-motion ? 0ms : 550ms; easing: cubic-bezier(0.333333, 0, 0.666667, 1); }
+    // Mac 在 floodAnimating 切换时有 SwiftUI 默认 0.35 s 交叉淡入：醒来时圆从淡到实，
+    // 睡着时整屏先变淡（约 150 ms 最淡 ≈ 75%）再随圆收走。e = easeInOut(t / 0.35 s)。
+    out property <float> flood-dir: awake ? 1 : 0;
+    animate flood-dir { duration: root.reduced-motion ? 0ms : 350ms; easing: ease-in-out; }
+    property <float> flood-e: root.awake ? root.flood-dir : 1 - root.flood-dir;
+    property <float> flood-alpha: root.awake ? root.flood-e : 1 - root.flood-e * (1 - root.flood-e);
+    changed awake => { S.flood-x = root.ear-x / 1px; Theme.awake = root.awake; }
+    changed mode => { Theme.mode = root.mode; }
+    changed os-dark => { Theme.dark = root.os-dark; }
+    changed trouble => { Theme.trouble = root.trouble != ""; }
+    changed tun-mode => { S.line-tun = root.tun-mode; }
+    changed ear-x => { S.grab-x = root.ear-x / 1px; }
+    changed ear-tip-x => { S.tip-x = root.ear-tip-x / 1px + 100; }
+    changed tip-text => {
+        // PurrEarBandView.tipView
+        S.tip-pre = root.first-run ? "先导入订阅，再按住耳朵" : root.holding ? (root.awake ? "再按久一点…哄它睡觉" : "继续按住…它在醒了") : "按住耳朵 /";
+        S.tip-kbd = !root.first-run && !root.holding;
+        S.tip-post = root.first-run || root.holding ? "" : (root.awake ? "哄它睡觉" : "叫醒它");
+    }
+    changed first-run => { if !root.first-run { focus.focus(); } }
+    callback toggle-run();
+    callback set-mode(string);
+    callback select-node(string, string);
+    callback test-group(string);
+    callback select-group(int);
+    callback close-connections();
+    callback close-connection(string);
+    callback reload();
+    callback clear-logs();
+    callback rule-query(string);
+    callback conn-query(string);
+    callback log-filter-changed(string);
+    callback toggle-sys-proxy();
+    callback toggle-tun();
+    callback toggle-sound();
+    callback switch-page(int);
+    callback inspect-node(int);
+    callback action(string, string);
+    callback window-action(string);
+    callback drag-window(length, length);
+
+    Rectangle {
+        width: 100%; height: 100%; clip: true;
+        background: Theme.sleep-bg;
+        Rectangle { width: 100%; height: 100%; background: root.flood-progress >= 1 ? Theme.warm : transparent; }
+        // 圆在 Slint 里直接画（不再等 Rust 每 32 ms 算一次路径，避免半径滞后、醒来右下角残留灰）。
+        // 半径 = hypot(w, h) × 1.15 × smoothstep，圆心 (耳朵 x, 110)，与 Mac PurrMainView 同式。
+        if root.flood-progress > 0 && root.flood-progress < 1: Rectangle {
+            property <float> diag: Math.sqrt(Math.pow(root.width / 1px, 2) + Math.pow(root.height / 1px, 2));
+            property <length> r: self.diag * 1.15 * root.flood-progress * 1px;
+            x: S.flood-x * 1px - self.r; y: 110px - self.r;
+            width: self.r * 2; height: self.r * 2; border-radius: self.r;
+            background: Theme.warm;
+            opacity: root.flood-alpha;
+        }
+    }
+    focus := FocusScope {
+        width: 100%; height: 100%;
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if event.modifiers.control || event.modifiers.meta {
+                if event.text == "q" { root.window-action("quit"); return accept; }
+                if root.tray-open && event.text == "c" { root.action("copy", ""); return accept; }
+                if root.tray-open && event.text == "o" { root.tray-open = false; return accept; }
+            }
+            if event.text == " " { if !root.holding { root.holding = true; } return accept; }
+            if event.text == Key.Escape { root.tray-open = false; return accept; }
+            return reject;
+        }
+        key-released(event) => {
+            if event.text == " " { root.holding = false; root.hold = 0; return accept; }
+            return reject;
+        }
+        TopBar { x: 0; y: 0; width: parent.width; }
+        Band { y: 50px; width: parent.width; changed width => { root.line-w = self.width; } }
+        Rectangle {
+            x: 0; y: 186px; width: parent.width; height: parent.height - 186px; clip: true;
+            page-scroll := ScrollView {
+            width: parent.width; height: parent.height;
+            content-width: max(self.width, 1200px);
+            content-height: max(self.height, 574px);
+            // macOS switches pages without a transition.
+            Rectangle {
+            x: 40px; y: 28px;
+            width: max(page-scroll.width, 1200px) - 80px; height: max(page-scroll.height, 574px) - 56px;
+            if root.page == 0: OverviewPage { width: parent.width; height: parent.height; }
+            if root.page == 1: NodesPage { width: parent.width; height: parent.height; }
+            if root.page == 2: SubsPage { width: parent.width; height: parent.height; }
+            if root.page == 3: ConnsPage { width: parent.width; height: parent.height; }
+            if root.page == 4: RulesPage { width: parent.width; height: parent.height; }
+            if root.page == 5: SettingsPage { width: parent.width; height: parent.height; }
+            }
+            }
+        }
+        // .transition(.opacity.combined(with: .offset(y: -4))): easeOut 0.22 s in, easeIn 0.22 s out
+        toast := Rectangle {
+            x: parent.width - self.width - 20px; y: 54px;
+            width: message.preferred-width + 20px; height: message.preferred-height + 10px; background: Theme.ink;
+            opacity: 0;
+            states [
+                shown when root.toast-on: {
+                    y: 58px; opacity: 1;
+                    in { animate y, opacity { duration: root.reduced-motion ? 0ms : 220ms; easing: ease-out; } }
+                    out { animate y, opacity { duration: root.reduced-motion ? 0ms : 220ms; easing: ease-in; } }
+                }
+            ]
+            message := Text { x: 10px; height: parent.height; text: root.toast-msg; color: Theme.bg; font-family: Theme.mono; font-size: 12px; vertical-alignment: center; }
+        }
+        if root.tray-open: Rectangle {
+            width: parent.width; height: parent.height;
+            TouchArea { clicked => { root.tray-open = false; } }
+            Tray { x: parent.width - 320px; y: 48px; }
+        }
+        if S.service-detail-open: ServiceDetailModal {
+            x: 0; y: 0; width: parent.width; height: parent.height;
+        }
+        // Apple-style 1px subtle inner border matching #app
+        Rectangle {
+            width: 100%; height: 100%;
+            border-radius: root.frame-radius;
+            border-width: 1px;
+            border-color: Theme.ink.with-alpha(0.12);
+        }
+    }
+}

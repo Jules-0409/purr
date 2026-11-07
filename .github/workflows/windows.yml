@@ -1,0 +1,59 @@
+name: Windows native validation
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: python tools/gen_icons.py
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --locked --release
+      - name: Build portable package and installer
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress -y
+          python tools/package_windows.py --binary target/release/Purr.exe --installer
+      - name: Native visual and interaction smoke
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ui-preview | Out-Null
+          $capture = Join-Path $pwd "ui-preview/windows-native"
+          $app = Start-Process -FilePath "$pwd/dist/Purr-0.1.0-windows-x64/Purr.exe" -ArgumentList "--preview","--capture",$capture -Wait -PassThru
+          if ($app.ExitCode -ne 0) { throw "Native visual smoke failed" }
+          if ((Get-ChildItem "$capture/*.ppm").Count -ne 20) { throw "Expected 20 screenshots" }
+      - name: Native animation curves
+        run: python tools/check_animation.py --binary dist/Purr-0.1.0-windows-x64/Purr.exe
+      - name: Native switch timing and original canvas samples
+        run: python tools/check_switch.py --binary dist/Purr-0.1.0-windows-x64/Purr.exe
+      - name: Native backend and combined memory
+        run: python tools/check_runtime.py --binary dist/Purr-0.1.0-windows-x64/Purr.exe
+      - name: Real proxy probes and automatic failover
+        if: success() || failure()
+        run: python tools/check_probes.py --binary dist/Purr-0.1.0-windows-x64/Purr.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Purr-windows-x64
+          path: |
+            dist/*.zip
+            dist/*setup.exe
+            dist/SHA256SUMS.txt
+            ui-preview/*.json
+            ui-preview/*.log
+            ui-preview/windows-native/*.ppm
+          retention-days: 14

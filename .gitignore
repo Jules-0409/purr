@@ -1,0 +1,31 @@
+# Build output
+/target
+/macos/.build
+/ui-preview
+
+# Release artifacts, installers and local backups (only the app icon is source)
+/dist/*
+!/dist/purr.ico
+*.dmg
+*.exe
+*.zip
+*.pkg
+
+# Third-party binaries and data, fetched separately (see README "Resources")
+/resources/mihomo-*
+/resources/clash-rs-*
+/resources/*.dat
+/resources/*.dll
+
+# Debug captures and local scratch
+/docs/captures
+/r[0-9]*/
+/mbatools/
+/screenshots/
+/shots/
+
+# OS / tooling noise
+.DS_Store
+*.log
+__pycache__/
+*.pyc

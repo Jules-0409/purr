@@ -1,0 +1,4 @@
+module PurrCore {
+    header "purr_core.h"
+    export *
+}

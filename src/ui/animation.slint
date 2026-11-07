@@ -1,0 +1,106 @@
+export global Anim {
+    public pure function rx(x: float, y: float, degrees: float, ox: float, oy: float) -> float {
+        return ox + (x - ox) * Math.cos(degrees * 1deg) - (y - oy) * Math.sin(degrees * 1deg);
+    }
+    public pure function ry(x: float, y: float, degrees: float, ox: float, oy: float) -> float {
+        return oy + (x - ox) * Math.sin(degrees * 1deg) + (y - oy) * Math.cos(degrees * 1deg);
+    }
+    public pure function c01(t: float) -> float { return Math.clamp(t, 0, 1); }
+    public pure function cubic(u: float, a: float, b: float) -> float {
+        return 3 * (1 - u) * (1 - u) * u * a + 3 * (1 - u) * u * u * b + u * u * u;
+    }
+    public pure function bezier-step(u: float, t: float, a: float, b: float) -> float {
+        let derivative = 3 * (1 - u) * (1 - u) * a + 6 * (1 - u) * u * (b - a) + 3 * u * u * (1 - b);
+        return c01(u - (cubic(u,a,b) - t) / max(0.00001, derivative));
+    }
+    // Solve x(u)=time before evaluating y(u), as CSS cubic-bezier does.
+    public pure function bezier(t: float, x1: float, y1: float, x2: float, y2: float) -> float {
+        let p = c01(t);
+        let u1 = bezier-step(p,p,x1,x2);
+        let u2 = bezier-step(u1,p,x1,x2);
+        let u3 = bezier-step(u2,p,x1,x2);
+        let u4 = bezier-step(u3,p,x1,x2);
+        let u5 = bezier-step(u4,p,x1,x2);
+        let u6 = bezier-step(u5,p,x1,x2);
+        return cubic(u6,y1,y2);
+    }
+    public pure function eio(t: float) -> float { return bezier(t,0.42,0,0.58,1); }
+    public pure function ease(t: float) -> float { return bezier(t,0.25,0.1,0.25,1); }
+    // @keyframes twitch {30%{rotate(-8deg) translateY(-.6px)} 60%{rotate(5deg)}} .45s ease
+    public pure function twitch-rot(p: float) -> float {
+        return p >= 450 || p < 0 ? 0
+             : p < 135 ? -8 * ease(p / 135)
+             : p < 270 ? -8 + 13 * ease((p - 135) / 135)
+             : 5 - 5 * ease((p - 270) / 180);
+    }
+    public pure function twitch-ty(p: float) -> float {
+        return p >= 450 || p < 0 ? 0
+             : p < 135 ? -0.6 * ease(p / 135)
+             : p < 270 ? -0.6 + 0.6 * ease((p - 135) / 135)
+             : 0;
+    }
+    // @keyframes hop {40%{translate(1px,-1.5px)}} .5s ease — returns 0..1 factor
+    public pure function hop(p: float) -> float {
+        return p >= 500 || p < 0 ? 0 : p < 200 ? ease(p / 200) : 1 - ease((p - 200) / 300);
+    }
+    // @keyframes peek {0%,100%{opacity:1} 40%{opacity:0}} .9s ease
+    public pure function peek(p: float) -> float {
+        return p >= 900 || p < 0 ? 1 : p < 360 ? 1 - ease(p / 360) : ease((p - 360) / 540);
+    }
+    // @keyframes wag {to{rotate(-14deg)}} .6s ease-in-out infinite alternate — degrees
+    public pure function wag(t: float) -> float {
+        return -14 * eio(Math.mod(t, 1200) < 600 ? Math.mod(t, 1200) / 600 : 2 - Math.mod(t, 1200) / 600);
+    }
+    // @keyframes pulse {50%{opacity:.25}} 1.8s ease-in-out infinite
+    public pure function pulse(t: float, adv: float) -> float {
+        return Math.mod(t + adv, 1800) < 900
+            ? 1 - 0.75 * eio(Math.mod(t + adv, 1800) / 900)
+            : 0.25 + 0.75 * eio((Math.mod(t + adv, 1800) - 900) / 900);
+    }
+    // @keyframes blink {0%,94%,100%{scaleY(1)} 97%{scaleY(.1)}} 4.2s
+    public pure function blink(t: float) -> float {
+        return Math.mod(t, 4200) < 3948 ? 1
+             : Math.mod(t, 4200) < 4074 ? 1 - 0.9 * ease((Math.mod(t, 4200) - 3948) / 126)
+             : 0.1 + 0.9 * ease((Math.mod(t, 4200) - 4074) / 126);
+    }
+    // same keyframes, `1s steps(1)` (the prototype's log cursor ends up using this one)
+    public pure function cursor(t: float) -> float { return Math.mod(t, 1000) < 970 ? 1 : 0.1; }
+    // @keyframes drift {50%{translateY(-10px)}} 5s ease-in-out infinite — returns px
+    public pure function drift(t: float, adv: float) -> float {
+        return Math.mod(t + adv, 5000) < 2500
+            ? -10 * eio(Math.mod(t + adv, 5000) / 2500)
+            : -10 + 10 * eio((Math.mod(t + adv, 5000) - 2500) / 2500);
+    }
+    // @keyframes vib {50%{translateY(-amp)}} linear — returns 0..-1 factor
+    public pure function vib(t: float, period: float, adv: float) -> float {
+        return Math.mod(t + adv, period) < period / 2
+            ? -Math.mod(t + adv, period) / (period / 2)
+            : -(period - Math.mod(t + adv, period)) / (period / 2);
+    }
+    // @keyframes wob {50%{translateY(-1px) rotate(8deg)}} 1.6s ease-in-out — 0..1 factor
+    public pure function wob(t: float) -> float {
+        return Math.mod(t, 1600) < 800 ? eio(Math.mod(t, 1600) / 800) : 1 - eio((Math.mod(t, 1600) - 800) / 800);
+    }
+    // @keyframes shk {25%{translateX(-6px)} 75%{translateX(6px)}} — px, p in 0..dur
+    public pure function shake(p: float, dur: float) -> float {
+        return p < 0 || p >= dur ? 0
+             : p < dur * 0.25 ? -6 * ease(p / (dur * 0.25))
+             : p < dur * 0.75 ? -6 + 12 * ease((p - dur * 0.25) / (dur * 0.5))
+             : 6 - 6 * ease((p - dur * 0.75) / (dur * 0.25));
+    }
+    // evaluateTwitch (PurrIcons.swift), 0.45 s: sine-in to -8°/-0.6 px by 30 %, cosine to +5° by 65 %, cosine back to 0.
+    public pure function mac-twitch-rot(ms: float) -> float {
+        let p = ms / 450;
+        return (ms < 0 || p >= 1) ? 0
+             : p < 0.3 ? -8 * Math.sin(p / 0.3 * 90deg)
+             : p < 0.65 ? -8 + 13 * (1 - Math.cos((p - 0.3) / 0.35 * 180deg)) * 0.5
+             : 5 * (1 + Math.cos((p - 0.65) / 0.35 * 180deg)) * 0.5;
+    }
+    public pure function mac-twitch-ty(ms: float) -> float {
+        let p = ms / 450;
+        return (ms < 0 || p >= 1) ? 0
+             : p < 0.3 ? -0.6 * Math.sin(p / 0.3 * 90deg)
+             : p < 0.65 ? -0.6 * (1 - (1 - Math.cos((p - 0.3) / 0.35 * 180deg)) * 0.5)
+             : 0;
+    }
+}

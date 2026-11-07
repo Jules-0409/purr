@@ -1,0 +1,158 @@
+import { T } from "theme.slint";
+import { IconClock } from "../tokens.slint";
+import { TrayNode } from "../types.slint";
+import { Icon } from "icons.slint";
+import { Face } from "faces.slint";
+import { Lbl, CatSwitchFull, Seg, DashBox } from "widgets.slint";
+component VCenter inherits VerticalLayout { alignment: center; horizontal-stretch: 0; }
+// PurrTrayPopoverView (main.swift): fixed 308 px, no hover states, no transitions.
+component TrSec inherits Rectangle {
+    in property <string> label;
+    in property <length> gap: 6px;
+    height: sec-lay.preferred-height;
+    sec-lay := VerticalLayout {
+        padding-left: 16px; padding-right: 16px; padding-top: 10px; padding-bottom: 10px; spacing: root.gap;
+        if root.label != "": Text { text: root.label; font-family: T.mono; font-size: 10px; letter-spacing: 1.5px + 10px * T.mt; color: T.mute; height: 13px; vertical-alignment: center; }
+        @children
+    }
+    Rectangle { x: 0; y: 0; width: parent.width; height: 1px; background: T.line; }
+}
+
+component CapBtn inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> pressed;
+    in property <bool> dim;
+    callback clicked;
+    property <color> fg: root.pressed ? T.bg : T.ink;
+    border-width: 1.5px; border-color: T.ink; border-radius: 4px;
+    background: root.pressed ? T.ink : transparent;
+    height: 28px;
+    preferred-width: 0px;
+    horizontal-stretch: 1;
+    opacity: root.dim ? 0.6 : 1;
+    HorizontalLayout { alignment: center; spacing: 5px;
+        VCenter { Icon { name: root.icon; width: 14px; height: 14px; stroke: 1.9; tint: root.fg; eyes-open: root.pressed; } }
+        Text { text: root.label; font-family: T.mono; font-size: 11.5px; letter-spacing: 11.5px * T.mt; font-weight: root.pressed ? 700 : 400; color: root.fg; vertical-alignment: center; overflow: elide; }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+component TrFootBtn inherits Rectangle {
+    in property <string> label;
+    in property <string> kbd;
+    callback clicked;
+    height: 27px;
+    HorizontalLayout { padding-left: 8px; padding-right: 8px;
+        Text { text: root.label; font-family: T.sans; font-size: 12.5px; color: T.ink; vertical-alignment: center; horizontal-stretch: 1; }
+        Text { text: root.kbd; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.ink; opacity: 0.6; vertical-alignment: center; }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+component TrModeSeg inherits Rectangle {
+    in property <string> mode;
+    callback picked(string);
+    border-width: 1.5px; border-color: T.ink; border-radius: 4px;
+    clip: true;
+    height: 24px;
+    HorizontalLayout {
+        for it[i] in ["分流", "全局", "直连"]: item := Rectangle {
+            horizontal-stretch: 1;
+            property <string> key: i == 0 ? "rule" : i == 1 ? "global" : "direct";
+            property <bool> active: root.mode == self.key;
+            background: self.active ? T.ink : transparent;
+            Text { text: it; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; font-weight: item.active ? 700 : 400; color: item.active ? T.bg : T.ink; horizontal-alignment: center; vertical-alignment: center; }
+            TouchArea { mouse-cursor: pointer; clicked => { root.picked(item.key); } }
+        }
+    }
+    Rectangle { border-width: 1.5px; border-color: T.ink; border-radius: 4px; }
+}
+
+export component NativeTray inherits Rectangle {
+    in property <bool> first-run;
+    in property <bool> awake;
+    in property <bool> sys-proxy;
+    in property <bool> tun-mode;
+    in property <bool> tun-auth: true;
+    in property <string> mode: "rule";
+    in property <string> subtitle;
+    in property <string> metrics;
+    in property <string> down;
+    in property <string> up;
+    in property <string> memory;
+    in property <string> total;
+    in property <string> unit;
+    in property <string> trouble;
+    in property <string> trouble-title;
+    in property <string> trouble-action;
+    in property <string> countdown;
+    in property <[TrayNode]> nodes;
+    callback action(string, string);
+    callback select-node(string, string);
+    width: 308px;
+    height: lay.preferred-height;
+    background: T.bg;
+    // swallow clicks inside the popover
+    TouchArea { }
+    Rectangle { x: 0; y: 0; width: parent.width; height: parent.height; clip: true;
+    lay := VerticalLayout {
+        // header: HStack padding 16 / 13
+        Rectangle { height: 61.5px;
+            VerticalLayout { x: 16px; y: 13px; width: parent.width - 32px - 66px; height: 35.5px; spacing: 2px; alignment: center;
+                Text { text: (root.first-run ? "没有窝" : root.trouble != "" ? "卡住了" : root.awake && root.mode == "direct" ? "醒着 · 直连" : root.awake ? "呼噜中" : "睡着了"); font-family: T.sans; font-size: 15px; font-weight: 800; color: T.ink; height: 19px; vertical-alignment: center; }
+                Text { text: root.subtitle; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; color: T.mute; height: 13px; vertical-alignment: center; overflow: elide; }
+            }
+            Rectangle { x: parent.width - 16px - 56px; y: (parent.height - 30px) / 2; width: 56px; height: 30px;
+                CatSwitchFull { on: root.awake; hover: swa.has-hover; }
+                swa := TouchArea { mouse-cursor: pointer; clicked => { root.action("toggle", ""); } }
+            }
+        }
+        TrSec { label: "走法";
+            TrModeSeg { mode: root.mode; picked(k) => { root.action("mode", k); } }
+        }
+        TrSec { label: "接管";
+            HorizontalLayout { spacing: 8px; height: 28px;
+                CapBtn { icon: "sys"; label: "系统代理"; pressed: root.sys-proxy; clicked => { root.action("proxy", ""); } }
+                CapBtn { icon: "tun"; label: (root.tun-auth || root.tun-mode) ? "虚拟网卡" : "虚拟网卡 · 需授权"; pressed: root.tun-mode; dim: false; clicked => { root.action("tun", ""); } }
+            }
+        }
+        TrSec { label: "节点选择"; gap: 4px;
+            for n in root.nodes: Rectangle {
+                height: 21px;
+                HorizontalLayout { spacing: 8px;
+                    VCenter { width: 7px; Rectangle { width: 7px; height: 7px; border-radius: 3.5px; background: n.selected ? T.ink : transparent;
+                        Rectangle { x: -0.75px; y: -0.75px; width: 8.5px; height: 8.5px; border-radius: 4.25px; border-width: 1.5px; border-color: T.ink; } } }
+                    Text { text: n.name; font-family: T.mono; font-size: 12px; letter-spacing: 12px * T.mt; font-weight: n.selected ? 700 : 400; color: T.ink; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                    Text { text: n.delay; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                }
+                na := TouchArea { mouse-cursor: pointer; clicked => { root.select-node(n.group, n.node); } }
+            }
+        }
+        // data row: padding 16 / 9
+        Rectangle { height: 9px + 26px + 9px;
+            Rectangle { x: 0; y: 0; width: parent.width; height: 1px; background: T.line; }
+            HorizontalLayout { x: 16px; y: 9px; width: parent.width - 32px; height: 26px;
+                VerticalLayout { alignment: center; spacing: 1px;
+                    Text { text: "↑ " + root.up + " MB/s"; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; color: T.mute; height: 13px; vertical-alignment: center; }
+                    Text { text: "↓ " + root.down + " MB/s"; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; font-weight: 700; color: T.ink; height: 13px; vertical-alignment: center; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "内存 " + root.memory + " MB"; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; color: T.mute; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "今日 " + root.total + " " + root.unit; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; color: T.mute; vertical-alignment: center; }
+            }
+        }
+        // footer: VStack(spacing 2) padding 8
+        Rectangle {
+            height: fl.preferred-height;
+            Rectangle { x: 0; y: 0; width: parent.width; height: 1px; background: T.line; }
+            fl := VerticalLayout { padding: 8px; spacing: 2px;
+                TrFootBtn { label: "复制终端代理命令"; kbd: T.shortcut + "C"; clicked => { root.action("copy", ""); } }
+                TrFootBtn { label: "打开 PURR"; kbd: T.shortcut + "O"; clicked => { root.action("open", ""); } }
+                TrFootBtn { label: "退出"; kbd: T.shortcut + "Q"; clicked => { root.action("quit", ""); } }
+            }
+        }
+    }
+    }
+}

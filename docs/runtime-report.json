@@ -1,0 +1,543 @@
+{
+  "checks": [
+    "fresh profile + 2,001 real rules loaded",
+    "all three outbound modes",
+    "node selection persisted in controller",
+    "64 real proxy transfers, 16 concurrent",
+    "disconnect one active transfer by connection ID",
+    "disconnect all active transfers",
+    "real settings + DNS + ad rules + port rebinding + subscription import + failed-edit preservation",
+    "core exit + supervised restart",
+    "all six real UI pages selected via native pointer events"
+  ],
+  "transferred_bytes": 184549376,
+  "samples": [
+    {
+      "shell": 671744,
+      "core": 0,
+      "shell_physical": 180344,
+      "core_physical": 0
+    },
+    {
+      "shell": 79216640,
+      "core": 0,
+      "shell_physical": 13779880,
+      "core_physical": 0
+    },
+    {
+      "shell": 86605824,
+      "core": 39436288,
+      "shell_physical": 20661208,
+      "core_physical": 17809960
+    },
+    {
+      "shell": 107331584,
+      "core": 39469056,
+      "shell_physical": 36930616,
+      "core_physical": 17826344
+    },
+    {
+      "shell": 137314304,
+      "core": 39469056,
+      "shell_physical": 62538904,
+      "core_physical": 17826344
+    },
+    {
+      "shell": 164888576,
+      "core": 39469056,
+      "shell_physical": 87475352,
+      "core_physical": 17826344
+    },
+    {
+      "shell": 164954112,
+      "core": 39469056,
+      "shell_physical": 87508120,
+      "core_physical": 17826344
+    },
+    {
+      "shell": 164954112,
+      "core": 39485440,
+      "shell_physical": 87524504,
+      "core_physical": 17842728
+    },
+    {
+      "shell": 165003264,
+      "core": 39485440,
+      "shell_physical": 87540888,
+      "core_physical": 17842728
+    },
+    {
+      "shell": 165003264,
+      "core": 39501824,
+      "shell_physical": 87540888,
+      "core_physical": 17859112
+    },
+    {
+      "shell": 165003264,
+      "core": 39501824,
+      "shell_physical": 87540888,
+      "core_physical": 17859112
+    },
+    {
+      "shell": 165003264,
+      "core": 39501824,
+      "shell_physical": 87540888,
+      "core_physical": 17859112
+    },
+    {
+      "shell": 165003264,
+      "core": 39501824,
+      "shell_physical": 87540888,
+      "core_physical": 17859112
+    },
+    {
+      "shell": 165429248,
+      "core": 39616512,
+      "shell_physical": 87704728,
+      "core_physical": 17973800
+    },
+    {
+      "shell": 165527552,
+      "core": 39616512,
+      "shell_physical": 87737496,
+      "core_physical": 17973800
+    },
+    {
+      "shell": 165527552,
+      "core": 39616512,
+      "shell_physical": 87737496,
+      "core_physical": 17973800
+    },
+    {
+      "shell": 165543936,
+      "core": 39632896,
+      "shell_physical": 87753880,
+      "core_physical": 17990184
+    },
+    {
+      "shell": 165543936,
+      "core": 39731200,
+      "shell_physical": 87753880,
+      "core_physical": 18088488
+    },
+    {
+      "shell": 165543936,
+      "core": 39731200,
+      "shell_physical": 84559000,
+      "core_physical": 18088488
+    },
+    {
+      "shell": 165543936,
+      "core": 39731200,
+      "shell_physical": 84559000,
+      "core_physical": 18088488
+    },
+    {
+      "shell": 166723584,
+      "core": 41533440,
+      "shell_physical": 85738648,
+      "core_physical": 19890728
+    },
+    {
+      "shell": 166723584,
+      "core": 41533440,
+      "shell_physical": 85738648,
+      "core_physical": 19890728
+    },
+    {
+      "shell": 166772736,
+      "core": 41533440,
+      "shell_physical": 85738648,
+      "core_physical": 19890728
+    },
+    {
+      "shell": 167067648,
+      "core": 41533440,
+      "shell_physical": 85804184,
+      "core_physical": 19890728
+    },
+    {
+      "shell": 167067648,
+      "core": 41566208,
+      "shell_physical": 85804184,
+      "core_physical": 19923496
+    },
+    {
+      "shell": 170393600,
+      "core": 41566208,
+      "shell_physical": 92259480,
+      "core_physical": 19923496
+    },
+    {
+      "shell": 167067648,
+      "core": 41566208,
+      "shell_physical": 85804184,
+      "core_physical": 19923496
+    },
+    {
+      "shell": 175996928,
+      "core": 41598976,
+      "shell_physical": 95683736,
+      "core_physical": 19694120
+    },
+    {
+      "shell": 167067648,
+      "core": 41598976,
+      "shell_physical": 85230744,
+      "core_physical": 19694120
+    },
+    {
+      "shell": 167067648,
+      "core": 41598976,
+      "shell_physical": 85230744,
+      "core_physical": 19694120
+    },
+    {
+      "shell": 167084032,
+      "core": 41598976,
+      "shell_physical": 85247128,
+      "core_physical": 19694120
+    },
+    {
+      "shell": 167084032,
+      "core": 41598976,
+      "shell_physical": 85247128,
+      "core_physical": 19694120
+    },
+    {
+      "shell": 167477248,
+      "core": 41598976,
+      "shell_physical": 85460120,
+      "core_physical": 19694120
+    },
+    {
+      "shell": 167477248,
+      "core": 41598976,
+      "shell_physical": 85460120,
+      "core_physical": 19694120
+    },
+    {
+      "shell": 167542784,
+      "core": 41598976,
+      "shell_physical": 85525656,
+      "core_physical": 19694120
+    },
+    {
+      "shell": 167542784,
+      "core": 41598976,
+      "shell_physical": 85525656,
+      "core_physical": 19710504
+    },
+    {
+      "shell": 170147840,
+      "core": 41598976,
+      "shell_physical": 89441432,
+      "core_physical": 19710504
+    },
+    {
+      "shell": 167542784,
+      "core": 41615360,
+      "shell_physical": 83346584,
+      "core_physical": 19776040
+    },
+    {
+      "shell": 167739392,
+      "core": 41779200,
+      "shell_physical": 83543192,
+      "core_physical": 20120104
+    },
+    {
+      "shell": 167739392,
+      "core": 41779200,
+      "shell_physical": 83543192,
+      "core_physical": 20120104
+    },
+    {
+      "shell": 167739392,
+      "core": 41779200,
+      "shell_physical": 83543192,
+      "core_physical": 20120104
+    },
+    {
+      "shell": 167739392,
+      "core": 41779200,
+      "shell_physical": 83543192,
+      "core_physical": 20120104
+    },
+    {
+      "shell": 173948928,
+      "core": 41779200,
+      "shell_physical": 89703576,
+      "core_physical": 20136488
+    },
+    {
+      "shell": 173948928,
+      "core": 41779200,
+      "shell_physical": 89703576,
+      "core_physical": 20136488
+    },
+    {
+      "shell": 173948928,
+      "core": 41779200,
+      "shell_physical": 89703576,
+      "core_physical": 20136488
+    },
+    {
+      "shell": 173883392,
+      "core": 41779200,
+      "shell_physical": 89670808,
+      "core_physical": 20136488
+    },
+    {
+      "shell": 173899776,
+      "core": 41779200,
+      "shell_physical": 89687192,
+      "core_physical": 20136488
+    },
+    {
+      "shell": 173948928,
+      "core": 42074112,
+      "shell_physical": 89736344,
+      "core_physical": 20398632
+    },
+    {
+      "shell": 173948928,
+      "core": 42205184,
+      "shell_physical": 89736344,
+      "core_physical": 20464168
+    },
+    {
+      "shell": 173948928,
+      "core": 42270720,
+      "shell_physical": 89736344,
+      "core_physical": 20496936
+    },
+    {
+      "shell": 173948928,
+      "core": 42336256,
+      "shell_physical": 89736344,
+      "core_physical": 20546088
+    },
+    {
+      "shell": 173948928,
+      "core": 42385408,
+      "shell_physical": 89736344,
+      "core_physical": 20595240
+    },
+    {
+      "shell": 173932544,
+      "core": 42434560,
+      "shell_physical": 89719960,
+      "core_physical": 20644392
+    },
+    {
+      "shell": 174440448,
+      "core": 35192832,
+      "shell_physical": 84853912,
+      "core_physical": 15057472
+    },
+    {
+      "shell": 174440448,
+      "core": 35192832,
+      "shell_physical": 84853912,
+      "core_physical": 15057472
+    },
+    {
+      "shell": 174440448,
+      "core": 35192832,
+      "shell_physical": 84853912,
+      "core_physical": 15057472
+    },
+    {
+      "shell": 174473216,
+      "core": 35192832,
+      "shell_physical": 84886680,
+      "core_physical": 15057472
+    },
+    {
+      "shell": 174473216,
+      "core": 35192832,
+      "shell_physical": 84886680,
+      "core_physical": 15057472
+    },
+    {
+      "shell": 174473216,
+      "core": 35192832,
+      "shell_physical": 84886680,
+      "core_physical": 15057472
+    },
+    {
+      "shell": 174473216,
+      "core": 35192832,
+      "shell_physical": 84886680,
+      "core_physical": 15057472
+    },
+    {
+      "shell": 174473216,
+      "core": 35192832,
+      "shell_physical": 84886680,
+      "core_physical": 15057472
+    },
+    {
+      "shell": 174473216,
+      "core": 35192832,
+      "shell_physical": 84886680,
+      "core_physical": 15057472
+    },
+    {
+      "shell": 174473216,
+      "core": 35258368,
+      "shell_physical": 84886680,
+      "core_physical": 15073856
+    },
+    {
+      "shell": 174473216,
+      "core": 35258368,
+      "shell_physical": 84886680,
+      "core_physical": 15073856
+    },
+    {
+      "shell": 174473216,
+      "core": 35258368,
+      "shell_physical": 84886680,
+      "core_physical": 15073856
+    },
+    {
+      "shell": 174473216,
+      "core": 35258368,
+      "shell_physical": 84886680,
+      "core_physical": 15073856
+    },
+    {
+      "shell": 174473216,
+      "core": 35258368,
+      "shell_physical": 84886680,
+      "core_physical": 15073856
+    },
+    {
+      "shell": 174473216,
+      "core": 35258368,
+      "shell_physical": 84886680,
+      "core_physical": 15073856
+    },
+    {
+      "shell": 174784512,
+      "core": 37306368,
+      "shell_physical": 85197976,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174784512,
+      "core": 37306368,
+      "shell_physical": 85197976,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174784512,
+      "core": 37306368,
+      "shell_physical": 85197976,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174784512,
+      "core": 37306368,
+      "shell_physical": 85197976,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174784512,
+      "core": 37306368,
+      "shell_physical": 85197976,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174784512,
+      "core": 37306368,
+      "shell_physical": 85197976,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174784512,
+      "core": 37306368,
+      "shell_physical": 85197976,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174784512,
+      "core": 37306368,
+      "shell_physical": 85197976,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174800896,
+      "core": 37306368,
+      "shell_physical": 85214360,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174800896,
+      "core": 37306368,
+      "shell_physical": 85214360,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174800896,
+      "core": 37306368,
+      "shell_physical": 85214360,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174800896,
+      "core": 37306368,
+      "shell_physical": 85214360,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174800896,
+      "core": 37306368,
+      "shell_physical": 85214360,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174800896,
+      "core": 37306368,
+      "shell_physical": 85214360,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174800896,
+      "core": 37306368,
+      "shell_physical": 85214360,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174800896,
+      "core": 37306368,
+      "shell_physical": 85214360,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174800896,
+      "core": 37306368,
+      "shell_physical": 85214360,
+      "core_physical": 16777792
+    },
+    {
+      "shell": 174800896,
+      "core": 37306368,
+      "shell_physical": 85034136,
+      "core_physical": 16777792
+    }
+  ],
+  "peak_combined_mb": 217.595904,
+  "shell_peak_mb": 175.996928,
+  "core_peak_mb": 42.43456,
+  "budget_mb": 150,
+  "passed": false,
+  "system_proxy_unchanged": true,
+  "platform": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "renderer": "platform default",
+  "metric": "combined RSS, decimal MB",
+  "scope": "GUI and supervised core; temporary config-validator subprocesses excluded",
+  "peak_combined_physical_mb": 115.377856
+}

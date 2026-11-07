@@ -1,0 +1,255 @@
+// Window chrome: top bar, the "line" band with the cat ears, the fake macOS menubar and the tray popover
+import { T, Anim } from "theme.slint";
+import { S, TrayNode } from "state.slint";
+import { Icon } from "icons.slint";
+import { Face } from "faces.slint";
+import { Lbl, Bk, CatSwitchFull, Seg, DashBox } from "widgets.slint";
+import { NativeTray } from "native-tray.slint";
+
+component VCenter inherits VerticalLayout { alignment: center; horizontal-stretch: 0; }
+
+// PurrMarkView: 22 px, clipped to a 20 px rounded square (corner 5) at (1,1)
+export component Mark inherits Rectangle {
+    width: 22px; height: 22px;
+    Rectangle {
+        x: 1px; y: 1px; width: 20px; height: 20px; border-radius: 5px; clip: true;
+        background: T.bg;
+        Path {
+            x: -1px; y: -1px; width: 22px; height: 22px;
+            viewbox-x: 0; viewbox-y: 0; viewbox-width: 22; viewbox-height: 22;
+            commands: "M0 14 L1 14 L4.4 4.8 L8 10.2 Q11 8.8 14 10.2 L17.6 4.8 L21 14 L22 14 L22 22 L0 22 Z";
+            fill: T.ink;
+        }
+        Path {
+            x: -1px - 0.8px; y: -1px - 0.8px; width: 22px + 1.6px; height: 22px + 1.6px;
+            viewbox-x: 0; viewbox-y: 0; viewbox-width: 22; viewbox-height: 22;
+            commands: S.on ? "M7.1 16.8 Q8.4 18.2 9.7 16.8 M12.3 16.8 Q13.6 18.2 14.9 16.8" : "M7.3 17.2 L9.7 17.2 M12.3 17.2 L14.7 17.2";
+            stroke: T.bg; stroke-width: 1.6px; stroke-line-cap: round;
+        }
+    }
+}
+
+component ModeBtn inherits Rectangle {
+    in property <string> key;
+    in property <string> label;
+    in property <bool> force-hover;
+    property <bool> pressed: S.mode == root.key;
+    property <bool> hov: ta.has-hover || root.force-hover;
+    // HeaderAndBandView.modeButton: state changes are immediate (no SwiftUI animation).
+    property <color> fg: root.pressed ? T.bg : (root.hov ? T.ink : T.mute);
+    border-radius: 4px;
+    border-width: 1.3px;
+    border-color: root.pressed ? T.ink : T.ink.with-alpha(root.hov ? 0.5 : 0.25);
+    background: root.pressed ? T.ink : (root.hov ? T.ink.with-alpha(0.08) : transparent);
+    height: 28px;
+    HorizontalLayout {
+        padding-left: 12px; padding-right: 12px; spacing: 6px;
+        VCenter { Icon { name: root.key; width: 17px; height: 17px; stroke: 2; tint: root.fg; hover: root.hov; eyes-open: S.on; } }
+        Text { text: root.label; font-family: T.mono; font-size: 12.5px; font-weight: root.pressed ? 700 : 600; letter-spacing: 0.8px + 12.5px * T.mt; color: root.fg; vertical-alignment: center; }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { S.set-mode(root.key); } }
+}
+
+// stateBadge: padding 7/3, corner 3; the 1.2 px stroke is clipped to the shape (.6 px shows)
+component StateBadge inherits Rectangle {
+    in property <string> dot;
+    in property <string> text;
+    in property <bool> inverted;
+    property <color> fg: root.inverted ? T.bg : T.ink;
+    border-radius: 3px;
+    clip: true;
+    background: root.inverted ? T.ink : transparent;
+    HorizontalLayout {
+        padding-left: 7px; padding-right: 7px; padding-top: 3px; padding-bottom: 3px; spacing: 4px;
+        Text { text: root.dot; font-family: T.mono; font-size: 10px; letter-spacing: 10px * T.mt; font-weight: 900; color: root.fg; vertical-alignment: center; }
+        Text { text: root.text; font-family: T.sans; font-size: 11.5px; font-weight: 700; color: root.fg; vertical-alignment: center; height: 14px; }
+    }
+    Rectangle { border-width: 0.6px; border-color: T.ink; border-radius: 3px; }
+}
+
+// node pill / ip chip / speed cell: 1 px line-colour stroke centred on the edge (not clipped)
+component NodeChip inherits Rectangle {
+    border-radius: 3px;
+    Rectangle { x: -0.5px; y: -0.5px; width: parent.width + 1px; height: parent.height + 1px; border-width: 1px; border-color: T.line; border-radius: 3.5px; }
+    HorizontalLayout {
+        padding-left: 7px; padding-right: 7px; padding-top: 3px; padding-bottom: 3px; spacing: 5px;
+        Text { text: S.node-label; font-family: T.sans; font-size: 11.5px; font-weight: 700; color: T.ink; vertical-alignment: center; height: 14px; }
+        Text { text: S.node-delay; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { S.go(1); } }
+}
+
+component IpChip inherits Rectangle {
+    border-radius: 3px;
+    Rectangle { x: -0.5px; y: -0.5px; width: parent.width + 1px; height: parent.height + 1px; border-width: 1px; border-color: T.line; border-radius: 3.5px; }
+    HorizontalLayout {
+        padding-left: 7px; padding-right: 7px; padding-top: 3px; padding-bottom: 3px; spacing: 4px;
+        Text { text: "IP"; font-family: T.mono; font-size: 10px; letter-spacing: 10px * T.mt; font-weight: 700; color: T.mute; vertical-alignment: center; }
+        Text { text: S.ex-ip != "" ? S.ex-ip : "—"; font-family: T.mono; font-size: 11.5px; letter-spacing: 11.5px * T.mt; font-weight: 500; color: T.ink; vertical-alignment: center; height: 14px; }
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { S.service-detail-open = true; } }
+}
+
+// String(format: "↑ %4.1f MB/s"): the number is right-aligned in four columns
+component SpeedCell inherits Rectangle {
+    border-radius: 3px;
+    Rectangle { x: -0.5px; y: -0.5px; width: parent.width + 1px; height: parent.height + 1px; border-width: 1px; border-color: T.line; border-radius: 3.5px; }
+    VerticalLayout {
+        padding-left: 7px; padding-right: 7px; padding-top: 2px; padding-bottom: 2px; spacing: 0px;
+        Text { text: "↑ " + (S.up.character-count < 4 ? " " : "") + S.up + " MB/s"; font-family: T.mono; font-size: 9.5px; letter-spacing: 9.5px * T.mt; font-weight: 500; color: T.mute; horizontal-alignment: right; vertical-alignment: center; height: 12px; }
+        Text { text: "↓ " + (S.dn.character-count < 4 ? " " : "") + S.dn + " MB/s"; font-family: T.mono; font-size: 9.5px; letter-spacing: 9.5px * T.mt; font-weight: 700; color: T.ink; horizontal-alignment: right; vertical-alignment: center; height: 12px; }
+    }
+}
+
+export component TopBar inherits Rectangle {
+    height: 50px;
+    TouchArea { moved => { if self.pressed { S.drag-window(self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y); } } }
+    HorizontalLayout {
+        padding-left: 20px; padding-right: 20px; spacing: 16px;
+        // traffic lights
+        VCenter { HorizontalLayout { spacing: 8px;
+            Rectangle { width: 12px; height: 12px; border-radius: 6px; background: #FF5F57; TouchArea { mouse-cursor: pointer; clicked => { S.window-action("close"); } } }
+            Rectangle { width: 12px; height: 12px; border-radius: 6px; background: #FEBC2E; TouchArea { mouse-cursor: pointer; clicked => { S.window-action("minimize"); } } }
+            Rectangle { width: 12px; height: 12px; border-radius: 6px; background: #28C840; TouchArea { mouse-cursor: pointer; clicked => { S.window-action("maximize"); } } }
+        } }
+        // brand
+        HorizontalLayout { spacing: 9px; horizontal-stretch: 0;
+            VCenter { Mark { TouchArea { clicked => { S.tray-open = !S.tray-open; } } } }
+            Text { text: "PURR"; font-family: T.sans; font-weight: 900; font-size: 15px; letter-spacing: 4.2px; color: T.ink; vertical-alignment: center; }
+        }
+        // divider
+        VCenter { Rectangle { width: 1px; height: 18px; background: T.line; } }
+        // status cluster
+        HorizontalLayout { spacing: 12px; horizontal-stretch: 0;
+            if S.first: VCenter { StateBadge { dot: "○"; text: "没有窝"; inverted: false; } }
+            if S.first: Text { text: "先导入订阅"; font-family: T.mono; font-size: 11.5px; letter-spacing: 11.5px * T.mt; color: T.mute; vertical-alignment: center; }
+
+            if !S.first && S.err != "": VCenter { StateBadge { dot: "!"; text: "卡住了"; inverted: true; } }
+            if !S.first && S.err != "": Text { text: S.tr-st; font-family: T.mono; font-size: 11.5px; letter-spacing: 11.5px * T.mt; font-weight: 600; color: T.ink; vertical-alignment: center; }
+            if !S.first && S.err != "": VCenter { IpChip {} }
+
+            if !S.first && S.err == "" && S.on && S.mode == "direct": VCenter { StateBadge { dot: "●"; text: "直连中"; inverted: true; } }
+            if !S.first && S.err == "" && S.on && S.mode == "direct": VCenter { IpChip {} }
+            if !S.first && S.err == "" && S.on && S.mode == "direct": VCenter { SpeedCell {} }
+
+            if !S.first && S.err == "" && S.on && S.mode != "direct": VCenter { StateBadge { dot: "●"; text: "呼噜中"; inverted: true; } }
+            if !S.first && S.err == "" && S.on && S.mode != "direct": VCenter { NodeChip {} }
+            if !S.first && S.err == "" && S.on && S.mode != "direct": VCenter { IpChip {} }
+            if !S.first && S.err == "" && S.on && S.mode != "direct": VCenter { SpeedCell {} }
+
+            if !S.first && S.err == "" && !S.on: VCenter { StateBadge { dot: "z"; text: "睡着了"; inverted: false; } }
+            if !S.first && S.err == "" && !S.on: VCenter { IpChip {} }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        // 走法
+        HorizontalLayout { spacing: 10px; horizontal-stretch: 0;
+            Text { text: "走法"; font-family: T.mono; font-size: 11px; font-weight: 600; letter-spacing: 1.4px + 11px * T.mt; color: T.mute; vertical-alignment: center; }
+            HorizontalLayout { spacing: 6px; horizontal-stretch: 0;
+                VCenter { ModeBtn { key: "rule"; label: "分流"; } }
+                VCenter { ModeBtn { key: "global"; label: "全局"; } }
+                VCenter { ModeBtn { key: "direct"; label: "直连"; } }
+            }
+        }
+    }
+}
+
+component NavLabel inherits Rectangle {
+    in property <int> idx;
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> force-hover;
+    property <bool> cur: S.page == root.idx;
+    property <bool> hov: ta.has-hover || root.force-hover;
+    // PurrEarBandView tab: ink when current or hovered, otherwise mute; no fade.
+    property <color> fg: (root.cur || root.hov) ? T.ink : T.mute;
+    // VStack(spacing: 3): 22 px icon + 14 px text, centred in the 44 px frame.
+    Icon { x: (parent.width - 22px) / 2; y: (parent.height - 45.3px) / 2 + 1.5px; // +1.5/+2: measured against the macOS 2x render
+                   name: root.icon; width: 22px; height: 22px; tint: root.fg;
+                   stroke: root.cur ? 2 : 1.75; eyes-open: S.on; hover: root.hov; }
+    Text { y: (parent.height - 45.3px) / 2 + 27px; width: parent.width; text: root.label; font-family: T.sans; font-size: 14px; font-weight: root.cur ? 800 : 600; color: root.fg; horizontal-alignment: center; height: 17px; vertical-alignment: center; }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { S.go(root.idx); } }
+}
+
+export component Band inherits Rectangle {
+    height: 136px;
+    // the line (drawn by Rust every frame with PurrEarBandView's maths; y0 = 76 from the band top)
+    Rectangle {
+        x: 0; y: 0; width: parent.width; height: parent.height;
+        // hold progress: warm while waking, 35 % ink while falling asleep
+        if S.line-hold != "" && S.line-hold != "M0 0": Path {
+            width: parent.width; height: parent.height; fit: preserve;
+            commands: S.line-hold; stroke: S.on ? T.ink.with-alpha(0.35) : T.warm; stroke-width: S.on ? 3px : 3.6px; stroke-line-cap: round; stroke-line-join: round;
+        }
+        Path {
+            width: parent.width; height: parent.height; fit: preserve;
+            commands: S.line-main; stroke: T.ink; stroke-width: S.line-tun ? 8px : 3px; stroke-line-cap: round; stroke-line-join: round;
+        }
+        if S.line-tun: Path {
+            width: parent.width; height: parent.height; fit: preserve;
+            commands: S.line-main; stroke: T.bg; stroke-width: 3.2px; stroke-line-cap: round; stroke-line-join: round;
+        }
+    }
+    Rectangle { x: 0; y: 0; width: parent.width; height: 1px; background: T.line; }
+    Rectangle { x: 0; y: parent.height - 1.5px; width: parent.width; height: 1.5px; background: T.ink; }
+    // 6 page labels: HStack at the bottom with 10 px bottom padding, 44 px tall
+    HorizontalLayout {
+        x: 0; y: parent.height - 10px - 44px; width: parent.width; height: 44px;
+        NavLabel { idx: 0; icon: "ov"; label: "概览"; }
+        NavLabel { idx: 1; icon: "px"; label: "窝点"; }
+        NavLabel { idx: 2; icon: "sb"; label: "订阅"; }
+        NavLabel { idx: 3; icon: "cn"; label: "连接"; }
+        NavLabel { idx: 4; icon: "rl"; label: "规则"; }
+        NavLabel { idx: 5; icon: "st"; label: "习惯"; }
+    }
+    // hold-to-connect handle on the ears: 120×72 centred at (earX, 44)
+    grab := TouchArea {
+        x: S.grab-x * 1px - 60px; y: 8px; width: 120px; height: 72px;
+        mouse-cursor: S.holding ? MouseCursor.grabbing : MouseCursor.grab;
+        pointer-event(ev) => {
+            if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left) { S.grab-begin(); }
+            if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) { S.grab-end(); }
+        }
+        changed has-hover => { if (!self.has-hover) { S.grab-end(); } }
+    }
+    // the hint (.tip): centred at x = min(w - 115, max(120, earX + 92)), y = 18
+    tip := HorizontalLayout {
+        width: self.preferred-width; alignment: start; spacing: 4px;
+        x: Math.min(root.width - 115px, Math.max(120px, (S.grab-x + 92) * 1px)) - self.preferred-width / 2;
+        y: 18px - 8px;
+        height: 16px;
+        Text { text: S.tip-pre; font-family: T.mono; font-size: 10.5px; letter-spacing: 0.8px + 10.5px * T.mt; color: S.tip-nudge ? T.ink : T.mute; font-weight: S.tip-nudge ? 700 : 400; vertical-alignment: center; }
+        if S.tip-kbd: VCenter { Rectangle {
+            border-width: 1px; border-color: S.tip-nudge ? T.ink : T.mute; border-radius: 3px; height: kbd.preferred-height + 2px;
+            HorizontalLayout { padding-left: 4px; padding-right: 4px; padding-top: 1px; padding-bottom: 1px;
+                kbd := Text { text: "Space"; font-family: T.mono; font-size: 10.5px; letter-spacing: 0.8px + 10.5px * T.mt; color: S.tip-nudge ? T.ink : T.mute; font-weight: S.tip-nudge ? 700 : 400; vertical-alignment: center; }
+            }
+        } }
+        if S.tip-post != "": Text { text: S.tip-post; font-family: T.mono; font-size: 10.5px; letter-spacing: 0.8px + 10.5px * T.mt; color: S.tip-nudge ? T.ink : T.mute; font-weight: S.tip-nudge ? 700 : 400; vertical-alignment: center; }
+    }
+}
+
+// ---------------- tray popover (in-window preview of the OS tray window)
+export component Tray inherits Rectangle {
+    out property <float> entrance: 1;
+    width: 308px;
+    height: panel.height;
+    background: T.bg;
+    drop-shadow-offset-y: 18px; drop-shadow-blur: 50px; drop-shadow-color: #1C19264D;
+    panel := NativeTray {
+        x: 0; y: 0;
+        first-run: S.first; awake: S.on; sys-proxy: S.sys; tun-mode: S.tun; tun-auth: S.tun-auth; mode: S.mode;
+        subtitle: S.first ? "先导入订阅" : S.err != "" ? S.tr-st : S.on ? (S.mode == "direct" ? "不经过窝点 · " + (S.ex-ip != "" ? S.ex-ip : "—") : S.node-label + " · " + S.node-delay + " · " + (S.ex-ip != "" ? S.ex-ip : "—")) : ("系统代理已关 · 端口 " + S.port + " 仍在");
+        down: S.dn; up: S.up; memory: S.mem.to-float() > 0 ? Math.round(S.mem.to-float()) : S.mem; total: S.tot; unit: S.total-unit;
+        trouble: S.err; nodes: S.tray-nodes;
+        action(a, b) => {
+            if a == "toggle" { S.tray-switch(); }
+            if a == "mode" { S.set-mode(b); }
+            if a == "proxy" { S.toggle-sys(); }
+            if a == "tun" { S.toggle-tun(); }
+            if a == "copy" { S.action("copy", ""); }
+            if a == "open" { S.tray-open = false; }
+            if a == "quit" { S.window-action("quit"); }
+        }
+        select-node(g, n) => { S.tray-node(g, n); }
+    }
+}

@@ -1,0 +1,206 @@
+import { T } from "theme.slint";
+import { NodeItem as Stem, GroupTab as Route, ConnRow, RuleRow, LogRow, TrayNode, SubscriptionRow, SiteRow } from "../types.slint";
+export { NodeItem as Stem, GroupTab as Route, ConnRow, RuleRow, LogRow, TrayNode } from "../types.slint";
+// Everything the Rust side drives. Mirrors the prototype's `S` object + rendered DOM strings.
+
+export struct Fix { label: string, key: string }
+export struct AsciiRow { row: int, alpha: float, text: string }
+
+export global S {
+    // ---- core state
+    in-out property <bool> on;
+    in-out property <bool> first;
+    in-out property <string> err;           // "", timeout, offline, sub, port
+    in-out property <string> mode: "rule";  // rule, global, direct
+    in-out property <bool> sys: true;
+    in-out property <bool> tun;
+    in-out property <bool> tun-auth: true;   // false: TUN needs elevation first ("需授权")
+    in-out property <int> page;
+    in-out property <float> page-t: 1;      // 0..1 page entrance (.35s)
+    in-out property <bool> holding;
+
+    // ---- top bar
+    in-out property <string> st-b: first ? "没有窝" : err != "" ? "卡住了" : on && mode == "direct" ? "醒着" : on ? "呼噜中" : "睡着了";
+    in-out property <string> status-detail;
+    in-out property <string> st-rest: first ? " · 先导入订阅" : err != "" ? " · " + tr-h : on && mode == "direct" ? " · 直连 · 不经过窝点" : status-detail;
+
+    // ---- band / line
+    in-out property <string> line-main;
+    in-out property <string> line-hold;
+    in-out property <bool> line-tun;
+    in-out property <float> grab-x: 100;
+    in-out property <float> tip-x: 192;
+    in-out property <string> tip-pre: "按住耳朵 / ";
+    in-out property <bool> tip-kbd: true;
+    in-out property <string> tip-post: " 叫醒它";
+    in-out property <bool> tip-nudge;
+    in-out property <float> flood-x: 100;
+    in-out property <float> flood-y: 120;
+
+    // ---- overview
+    in-out property <string> mode-label: mode == "global" ? "全局" : mode == "direct" ? "直连" : "分流";
+    in-out property <string> caption-note: on && !sys && !tun ? " 但系统代理和 TUN 都关着，还没有流量经过它。" : "";
+    in-out property <styled-text> caption: err != "" ? @markdown("<font color=\"\{T.ink}\">**\{mode-label}**</font>：醒着，但流量过不去。") : !on ? @markdown("睡着了。醒来后按 <font color=\"\{T.ink}\">**\{mode-label}**</font> 走。") : mode == "rule" ? @markdown("<font color=\"\{T.ink}\">**分流**</font>：国内直走，其余经由 <font color=\"\{T.ink}\">**\{node-label}**</font>。\{caption-note}") : mode == "global" ? @markdown("<font color=\"\{T.ink}\">**全局**</font>：所有流量都经由 <font color=\"\{T.ink}\">**\{node-label}**</font>。\{caption-note}") : @markdown("<font color=\"\{T.ink}\">**直连**</font>：醒着，但不带路，流量全部直走。\{caption-note}");
+    in-out property <[string]> hero-ch: mode == "direct" ? ["m", "r", "r", "p", "."] : mode == "global" ? ["P", "R", "R", "R", "R"] : ["p", "r", "r", "r", "r"];
+    in-out property <[float]> hero-op: mode == "rule" ? [1, 1, 1, 0.55, 0.25] : [1, 1, 1, 1, 1];
+    in-out property <float> amp: 1.5;
+    in-out property <[AsciiRow]> ascii;     // DenseAsciiCatView layers, refreshed by Rust
+    in-out property <string> tr-k: err == "timeout" ? "NO RESPONSE · 窝点超时" : err == "offline" ? "OFFLINE · 断网了" : err == "sub" ? "SUBSCRIPTION · 订阅" : "CORE · 连接受阻"; in-out property <string> tr-h; in-out property <styled-text> tr-p: @markdown("\{trouble-desc}");
+    in-out property <[Fix]> tr-acts: [{ label: trouble-action, key: "primary" }, { label: trouble-secondary, key: "secondary" }]; in-out property <string> tr-cd;
+    in-out property <string> ex-ip: "—"; in-out property <string> ex-loc;
+    // troubleInfo(for:).st — the short status macOS shows in the header and on the IP line.
+    out property <string> tr-st: err == "timeout" ? node-label + " 没回应" : err == "offline" ? "本机没有网络" : err == "sub" ? "订阅已过期" : err == "port" ? "端口 " + port + " 被占用" : tr-h;
+    in-out property <bool> service-detail-open: false;
+    // 常用网站真测（与 Mac serviceProbes 同一列表）：ms 为「—」未测 /「超时」/「123ms」
+    in-out property <[SiteRow]> sites: [
+        { name: "Google", host: "www.google.com", via: "", ms: "—" },
+        { name: "GitHub", host: "api.github.com", via: "", ms: "—" },
+        { name: "Claude", host: "claude.ai", via: "", ms: "—" },
+        { name: "ChatGPT", host: "chatgpt.com", via: "", ms: "—" },
+        { name: "YouTube", host: "www.youtube.com", via: "", ms: "—" },
+        { name: "Telegram", host: "core.telegram.org", via: "", ms: "—" },
+        { name: "X / Twitter", host: "x.com", via: "", ms: "—" },
+        { name: "Apple", host: "www.apple.com", via: "", ms: "—" }
+    ];
+    in-out property <bool> sites-testing;
+    callback probe-sites(bool);
+    in-out property <[Route]> routes;
+    in-out property <string> dn: "0.0"; in-out property <string> up: "0.0";
+    in-out property <string> dn-s; in-out property <string> up-s;
+    in-out property <string> l3: on ? (mode == "direct" ? "AWAKE" : "PURRING") : "LAST NAP"; in-out property <string> tm: "00:00:00"; in-out property <string> tm-s: on ? "本次连接" : "上次睡前呼噜了这么久";
+    in-out property <string> tot: "0"; in-out property <string> tot-s;
+    in-out property <string> cnt: "\{connection-count}"; in-out property <string> cnt-s;
+    in-out property <string> mem: "—"; in-out property <float> mem-pct: mem-fraction * 100; in-out property <string> mem-s;
+    in-out property <float> chart-mx: 5;
+    in-out property <[string]> chart-lbl: ["0 MB/s", chart-mid + " MB/s", chart-max + " MB/s"];
+    in-out property <string> chart-dn; in-out property <string> chart-up;
+    in-out property <string> peak: "PEAK 0.0 MB/S";
+    in-out property <float> sbar-p: proxy-fraction * 100;
+    in-out property <styled-text> slg-a: @markdown("经窝点 **\{proxy-detail}**"); in-out property <styled-text> slg-b: @markdown("直连 **\{direct-detail}**"); in-out property <styled-text> slg-c: @markdown("抓住 **\{blocked-detail}** 只老鼠 · 连接采样");
+    in-out property <bool> subi-warn; in-out property <string> subi-n; in-out property <styled-text> subi-r: @markdown("\{sub-detail}");
+
+    // ---- nodes
+    in-out property <[string]> groups: [];
+    in-out property <int> gi;
+    in-out property <string> g-now-a: node-label; in-out property <string> g-now-b;
+    in-out property <[Stem]> stems;
+    in-out property <bool> testing;
+    in-out property <string> nd-lbl: "当前窝点"; in-out property <string> nd-name; in-out property <string> nd-sub;
+    in-out property <string> nd-lat; in-out property <string> nd-jit; in-out property <string> nd-loss; in-out property <string> nd-up;
+    // 真实样本数（本次运行的测速记录，最多 18 次）；0 = 还没测过
+    in-out property <int> nd-n;
+    // 窝点光谱右端刻度（ms），由 Rust 按最慢已测节点算出；≤250 用默认刻度
+    in-out property <int> sp-top: 250;
+    in-out property <string> sp-ln; in-out property <string> sp-av; in-out property <string> sp-x; in-out property <float> sp-dot: -1;
+    in-out property <string> vd-b; in-out property <string> vd-s; in-out property <string> alt-label; in-out property <int> alt-idx;
+    in-out property <string> mnote-g: node-label;
+
+    // ---- subs
+    in-out property <bool> sub-expired;
+
+    // ---- connections / log
+    in-out property <int> cn-tab;
+    in-out property <[ConnRow]> conns;
+    in-out property <string> cn-empty: on ? "还没有连接。流量经过时，会在这里留下爪印。" : "它睡着了，暂时没有连接。"; in-out property <string> cn-empty-ic: "ov";
+    in-out property <[LogRow]> logs;
+    in-out property <string> log-now;
+    in-out property <int> lv;
+
+    // ---- rules
+    in-out property <[RuleRow]> rules;
+
+    // ---- settings
+    in-out property <[bool]> sw: [auto-wake, auto-swap, block-ads, allow-lan, ipv6];
+    in-out property <string> lan-d: allow-lan ? "局域网设备可通过此端口连接" : "允许局域网设备连接";
+    in-out property <int> snd: sound-key == "off" ? 0 : sound-key == "ping" ? 1 : 2;
+    in-out property <int> dns: dns-key == "1.1.1.1" ? 0 : dns-key == "8.8.8.8" ? 1 : 2;
+    in-out property <string> port: "7890";
+
+    // ---- toast
+    in-out property <string> toast;
+    in-out property <bool> toast-on;
+
+    // ---- first run
+    in-out property <bool> importing;
+    in-out property <float> shake-t0: -10000;
+
+    // ---- menubar & tray
+    in-out property <string> demo: "ok";
+    in-out property <string> clock: "";
+    in-out property <string> ti-sp;
+    in-out property <bool> tray-open;
+    in-out property <float> tray-t0: -10000;
+    in-out property <string> trt: first ? "没有窝" : err != "" ? "卡住了" : on ? "呼噜中" : "睡着了"; in-out property <string> trs: node-label;
+    in-out property <[TrayNode]> tray-nodes;
+    in-out property <styled-text> trm-a: @markdown("↓ **\{dn}** ↑ **\{up}** MB/s"); in-out property <styled-text> trm-b: @markdown("内存 **\{mem}** MB"); in-out property <styled-text> trm-c: @markdown("今日 **\{tot}** \{total-unit}");
+    in-out property <string> tre-label: trouble-action; in-out property <string> tre-key: "primary";
+
+    in-out property <string> import-url;
+    in-out property <string> editing-id;
+    in-out property <length> import-x;
+    in-out property <length> import-y;
+    in-out property <string> total-unit: "B";
+    in-out property <int> connection-count;
+    in-out property <float> mem-fraction;
+    in-out property <float> proxy-fraction;
+    in-out property <string> proxy-detail: "—";
+    in-out property <string> direct-detail: "—";
+    in-out property <string> blocked-detail: "—";
+    in-out property <string> sub-detail;
+    in-out property <string> node-label;
+    in-out property <string> node-delay: "—"; // e.g. "32ms" for the current node
+    in-out property <string> group-name;
+    in-out property <string> rule-stat;
+    in-out property <string> chart-max: "5";
+    in-out property <string> chart-mid: "2.5";
+    in-out property <string> trouble-desc;
+    in-out property <string> trouble-action;
+    in-out property <string> trouble-secondary;
+    in-out property <string> sound-key: "off";
+    in-out property <string> dns-key: "1.1.1.1";
+    in-out property <bool> auto-wake;
+    in-out property <bool> auto-swap: true;
+    in-out property <bool> block-ads: true;
+    in-out property <bool> close-to-tray: true;
+    in-out property <bool> allow-lan;
+    in-out property <bool> ipv6: true;
+    in-out property <float> shake;
+    in-out property <bool> first-focus;
+    in-out property <[SubscriptionRow]> subscriptions;
+    callback action(string, string);
+    callback window-action(string);
+    callback drag-window(length, length);
+    callback node-select(string, string);
+    callback test(string);
+    callback log-filter(string);
+    // ---- callbacks (UI → Rust)
+    callback go(int);
+    callback set-mode(string);
+    callback toggle-sys();
+    callback toggle-tun();
+    callback grab-begin();
+    callback grab-end();
+    callback demo-pick(string);
+    callback tray-toggle();
+    callback tray-switch();
+    callback tray-node(string, string);
+    callback tray-open-main();
+    callback toast-msg(string);
+    callback fix(string);
+    callback do-import();
+    callback pick-group(int);
+    callback pick-node(int);
+    callback hover-node(int);
+    callback run-test();
+    callback cn-pick(int);
+    callback cn-query(string);
+    callback cut(string);
+    callback cut-all();
+    callback lv-pick(int);
+    callback log-clear();
+    callback rl-query(string);
+    callback switch-toggle(int);
+    callback snd-pick(int);
+    callback dns-pick(int);
+    callback close-pick(int);
+}

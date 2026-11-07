@@ -1,0 +1,18 @@
+import { Theme, IconClock } from "../tokens.slint";
+export { Anim } from "../animation.slint";
+export global T {
+    out property <color> ink: Theme.ink;
+    out property <color> mute: Theme.mute;
+    out property <color> line: Theme.line;
+    out property <color> bg: Theme.bg;
+    out property <color> warm: Theme.warm;
+    out property <bool> dark: Theme.dark;
+    out property <string> sans: Theme.sans;
+    out property <string> mono: Theme.mono;
+    out property <float> mt: Theme.mono-track;
+    out property <string> shortcut: Theme.shortcut;
+    out property <color> sleep: Theme.sleep-bg;
+    out property <color> desk: Theme.sleep-bg;
+    out property <bool> reduce-motion: IconClock.reduced;
+    out property <float> time: IconClock.time;
+}
