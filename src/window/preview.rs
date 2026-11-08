@@ -138,7 +138,12 @@ fn state() -> LiveState {
         node_history: histories()
             .into_iter()
             .enumerate()
-            .map(|(i, h)| (NODES[i].0.to_string(), h.into_iter().map(|v| v.map(|x| x as u32)).collect()))
+            .map(|(i, h)| {
+                (
+                    NODES[i].0.to_string(),
+                    h.into_iter().map(|v| v.map(|x| x as u32)).collect(),
+                )
+            })
             .collect(),
         ..LiveState::default()
     }

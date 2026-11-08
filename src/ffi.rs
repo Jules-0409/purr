@@ -295,7 +295,10 @@ pub extern "C" fn purr_core_init() -> c_int {
 async fn background_loop(api: Api, state: Arc<Mutex<FfiState>>, initial_awake: bool) {
     let _ = api.wait_ready().await;
     if initial_awake {
-        let sys = state.lock().map(|s| s.preferences.system_proxy).unwrap_or(true);
+        let sys = state
+            .lock()
+            .map(|s| s.preferences.system_proxy)
+            .unwrap_or(true);
         if sys {
             let _ = crate::proxy::enable();
         }
@@ -393,7 +396,8 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
 
     let proxies_json = api.proxies().await.ok();
     let conns_json = api.connections().await.ok();
-    let need_rules = state.lock().map(|g| g.rules.is_empty()).unwrap_or(true) || tick_count % 10 == 1;
+    let need_rules =
+        state.lock().map(|g| g.rules.is_empty()).unwrap_or(true) || tick_count % 10 == 1;
     let rules_json = if need_rules {
         api.rules().await.ok()
     } else {
@@ -416,7 +420,13 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
         let mut parsed = crate::present::proxy_groups(pjson);
         // 手选的 select 组排最前（托盘/概览默认操作第一组），fallback/url-test 等自动组靠后，GLOBAL 仍在最后
         parsed.sort_by_key(|pg| {
-            if pg.name == "GLOBAL" { 2 } else if pg.kind == "select" { 0 } else { 1 }
+            if pg.name == "GLOBAL" {
+                2
+            } else if pg.kind == "select" {
+                0
+            } else {
+                1
+            }
         });
         let mut next_groups = Vec::new();
         for pg in parsed {
@@ -708,7 +718,9 @@ pub extern "C" fn purr_core_set_mode(mode: *const c_char) {
     if mode.is_null() {
         return;
     }
-    let s = unsafe { CStr::from_ptr(mode) }.to_string_lossy().into_owned();
+    let s = unsafe { CStr::from_ptr(mode) }
+        .to_string_lossy()
+        .into_owned();
     let normalized = match s.as_str() {
         "global" => "global",
         "direct" => "direct",
@@ -803,12 +815,16 @@ pub extern "C" fn purr_core_test_group(group: *const c_char) -> *mut c_char {
             .into_owned()
     };
     let Some(ctx) = CTX.get().cloned() else {
-        return CString::new("{\"ok\":false}").unwrap_or_default().into_raw();
+        return CString::new("{\"ok\":false}")
+            .unwrap_or_default()
+            .into_raw();
     };
     // (显示名, 真实名)：测速要用 mihomo 里的真实名字，结果仍按显示名回给界面
     let nodes: Vec<(String, String)> = {
         let Ok(g) = ctx.state.lock() else {
-            return CString::new("{\"ok\":false}").unwrap_or_default().into_raw();
+            return CString::new("{\"ok\":false}")
+                .unwrap_or_default()
+                .into_raw();
         };
         g.groups
             .iter()
@@ -818,7 +834,11 @@ pub extern "C" fn purr_core_test_group(group: *const c_char) -> *mut c_char {
                 grp.nodes
                     .iter()
                     .map(|n| {
-                        let raw = g.raw_names.get(&n.name).cloned().unwrap_or_else(|| n.name.clone());
+                        let raw = g
+                            .raw_names
+                            .get(&n.name)
+                            .cloned()
+                            .unwrap_or_else(|| n.name.clone());
                         (n.name.clone(), raw)
                     })
                     .collect()
@@ -866,7 +886,9 @@ pub extern "C" fn purr_core_test_group(group: *const c_char) -> *mut c_char {
 #[no_mangle]
 pub extern "C" fn purr_core_probe_sites_json() -> *mut c_char {
     let Some(ctx) = CTX.get().cloned() else {
-        return CString::new("{\"ok\":false}").unwrap_or_default().into_raw();
+        return CString::new("{\"ok\":false}")
+            .unwrap_or_default()
+            .into_raw();
     };
     let mode = ctx.state.lock().map(|g| g.mode.clone()).unwrap_or_default();
     let port = crate::config::mixed_port();
@@ -1163,7 +1185,10 @@ pub extern "C" fn purr_core_snapshot_json() -> *mut c_char {
         .iter()
         .map(|s| {
             let used_gb = s.used().map(|u| u / (1024 * 1024 * 1024));
-            let total_gb = s.total.filter(|t| *t > 0).map(|t| (t / (1024 * 1024 * 1024)).max(1));
+            let total_gb = s
+                .total
+                .filter(|t| *t > 0)
+                .map(|t| (t / (1024 * 1024 * 1024)).max(1));
             let expires = s.expires.filter(|t| *t > 0);
             let exp = expires
                 .map(crate::subscriptions::date)
@@ -1269,15 +1294,16 @@ pub extern "C" fn purr_core_load_preferences_json() -> *mut c_char {
 }
 
 #[no_mangle]
-pub extern "C" fn purr_core_update_preference(
-    key: *const c_char,
-    value: *const c_char,
-) -> c_int {
+pub extern "C" fn purr_core_update_preference(key: *const c_char, value: *const c_char) -> c_int {
     if key.is_null() || value.is_null() {
         return -1;
     }
-    let k = unsafe { CStr::from_ptr(key) }.to_string_lossy().into_owned();
-    let v = unsafe { CStr::from_ptr(value) }.to_string_lossy().into_owned();
+    let k = unsafe { CStr::from_ptr(key) }
+        .to_string_lossy()
+        .into_owned();
+    let v = unsafe { CStr::from_ptr(value) }
+        .to_string_lossy()
+        .into_owned();
     let Ok(dir) = crate::config::app_config_dir() else {
         return -1;
     };
@@ -1392,7 +1418,11 @@ pub extern "C" fn purr_core_restart_core() -> c_int {
     let binary = crate::config::launch_binary();
     let old = ctx._core.lock().ok().and_then(|mut g| g.take());
     let api = ctx.api.clone();
-    let mode = ctx.state.lock().map(|g| g.mode.clone()).unwrap_or_else(|_| "rule".into());
+    let mode = ctx
+        .state
+        .lock()
+        .map(|g| g.mode.clone())
+        .unwrap_or_else(|_| "rule".into());
     let (core, ready) = ctx.handle.block_on(async move {
         if let Some(core) = old {
             core.shutdown().await;
@@ -1410,7 +1440,11 @@ pub extern "C" fn purr_core_restart_core() -> c_int {
     if let Ok(mut g) = ctx.state.lock() {
         g.tun = false;
     }
-    if ready { 0 } else { -1 }
+    if ready {
+        0
+    } else {
+        -1
+    }
 }
 
 #[no_mangle]

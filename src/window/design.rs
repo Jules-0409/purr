@@ -29,9 +29,12 @@ pub(super) fn wire(ui: &MainWindow) {
     forward!(on_window_action, invoke_window_action, action);
     forward!(on_drag_window, invoke_drag_window, dx, dy);
 
-    ui.global::<S>().on_probe_sites(|force| send(MenuCommand::ProbeSites(force)));
+    ui.global::<S>()
+        .on_probe_sites(|force| send(MenuCommand::ProbeSites(force)));
     // 启动时停在概览：等内核就绪后自动测一次常用网站
-    slint::Timer::single_shot(Duration::from_secs(5), || send(MenuCommand::ProbeSites(false)));
+    slint::Timer::single_shot(Duration::from_secs(5), || {
+        send(MenuCommand::ProbeSites(false))
+    });
     ui.global::<S>().on_go(|page| {
         if page == 0 {
             send(MenuCommand::ProbeSites(false));

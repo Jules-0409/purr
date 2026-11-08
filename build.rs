@@ -50,7 +50,10 @@ FILETYPE 0x1
                 .args(["-fo", "purr.res", "--", "purr.rc"])
                 .status()
                 .expect("failed to execute llvm-rc");
-            assert!(status.success() && res_path.exists(), "llvm-rc failed to compile purr.res");
+            assert!(
+                status.success() && res_path.exists(),
+                "llvm-rc failed to compile purr.res"
+            );
             println!("cargo:rustc-link-arg-bins={}", res_path.display());
         }
     }

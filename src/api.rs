@@ -163,7 +163,12 @@ impl Api {
     }
 
     /// `/proxies/{name}/delay?url=<url>&timeout=<ms>` for an arbitrary target URL.
-    pub async fn delay_url(&self, name: &str, target: &str, timeout_ms: u32) -> Result<u32, String> {
+    pub async fn delay_url(
+        &self,
+        name: &str,
+        target: &str,
+        timeout_ms: u32,
+    ) -> Result<u32, String> {
         let url = format!(
             "{}/proxies/{}/delay?timeout={timeout_ms}&url={}",
             self.base,

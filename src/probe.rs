@@ -88,14 +88,22 @@ fn chain_of(conns: &serde_json::Value, domain: &str, local: u16) -> Option<Vec<S
         let chains: Vec<String> = c
             .get("chains")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default();
         if chains.is_empty() {
             continue;
         }
         let sport = meta
             .get("sourcePort")
-            .and_then(|p| p.as_str().and_then(|s| s.parse::<u16>().ok()).or(p.as_u64().map(|v| v as u16)))
+            .and_then(|p| {
+                p.as_str()
+                    .and_then(|s| s.parse::<u16>().ok())
+                    .or(p.as_u64().map(|v| v as u16))
+            })
             .unwrap_or(0);
         if sport == local {
             return Some(chains);
@@ -108,7 +116,9 @@ fn chain_of(conns: &serde_json::Value, domain: &str, local: u16) -> Option<Vec<S
 /// Finds the real route for `domain` (outermost group, innermost node).
 pub async fn route(api: &Api, port: u16, domain: &str) -> Option<(String, String)> {
     let d = domain.to_string();
-    let tunnel = tokio::task::spawn_blocking(move || open_tunnel(port, &d)).await.ok()??;
+    let tunnel = tokio::task::spawn_blocking(move || open_tunnel(port, &d))
+        .await
+        .ok()??;
     let (sock, local) = tunnel;
     let mut found = None;
     for _ in 0..12 {
@@ -130,7 +140,14 @@ pub async fn route(api: &Api, port: u16, domain: &str) -> Option<(String, String
 }
 
 /// Probes one site: real route, then the core's delay test through that route.
-pub async fn probe_one(api: &Api, port: u16, id: &str, name: &str, domain: &str, mode: &str) -> SiteProbe {
+pub async fn probe_one(
+    api: &Api,
+    port: u16,
+    id: &str,
+    name: &str,
+    domain: &str,
+    mode: &str,
+) -> SiteProbe {
     let (group, node) = match route(api, port, domain).await {
         Some(r) => r,
         None => match mode {
@@ -143,7 +160,9 @@ pub async fn probe_one(api: &Api, port: u16, id: &str, name: &str, domain: &str,
     let ms = if group == "REJECT" || group.is_empty() {
         None
     } else {
-        api.delay_url(&group, &format!("https://{domain}"), 5000).await.ok()
+        api.delay_url(&group, &format!("https://{domain}"), 5000)
+            .await
+            .ok()
     };
     SiteProbe {
         id: id.into(),

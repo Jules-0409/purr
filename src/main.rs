@@ -151,9 +151,7 @@ fn run() -> Result<(), String> {
     // Windows：右键也弹自绘弹窗（与 Mac 托盘弹窗一致），不再弹系统原生菜单。
     #[cfg(windows)]
     let tray = tray.with_menu_on_right_click(false);
-    let tray = tray
-        .build()
-        .map_err(|err| err.to_string())?;
+    let tray = tray.build().map_err(|err| err.to_string())?;
     tray_icon::TrayIconEvent::set_event_handler(Some(|event| {
         if let tray_icon::TrayIconEvent::Click {
             button,
@@ -164,7 +162,10 @@ fn run() -> Result<(), String> {
         } = event
         {
             #[cfg(windows)]
-            let wanted = matches!(button, tray_icon::MouseButton::Left | tray_icon::MouseButton::Right);
+            let wanted = matches!(
+                button,
+                tray_icon::MouseButton::Left | tray_icon::MouseButton::Right
+            );
             #[cfg(not(windows))]
             let wanted = matches!(button, tray_icon::MouseButton::Left);
             if !wanted {

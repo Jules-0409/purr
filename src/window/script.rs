@@ -19,7 +19,11 @@ struct Runner {
 
 fn crop(ui: &MainWindow, r: [f32; 4]) -> Result<(u32, u32, Vec<u8>), String> {
     let frame = ui.window().take_snapshot().map_err(|e| e.to_string())?;
-    let scale = frame.width() as f32 / ui.window().size().to_logical(ui.window().scale_factor()).width;
+    let scale = frame.width() as f32
+        / ui.window()
+            .size()
+            .to_logical(ui.window().scale_factor())
+            .width;
     let (fw, fh) = (frame.width() as i32, frame.height() as i32);
     let x0 = ((r[0] * scale).round() as i32).clamp(0, fw);
     let y0 = ((r[1] * scale).round() as i32).clamp(0, fh);
@@ -56,7 +60,11 @@ fn key_text(k: &str) -> slint::SharedString {
     }
 }
 
-pub fn run(script: &std::path::Path, out: &std::path::Path, live: Arc<Mutex<LiveState>>) -> Result<(), String> {
+pub fn run(
+    script: &std::path::Path,
+    out: &std::path::Path,
+    live: Arc<Mutex<LiveState>>,
+) -> Result<(), String> {
     let text = std::fs::read_to_string(script).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
     let steps: Vec<Vec<String>> = text
@@ -76,90 +84,110 @@ pub fn run(script: &std::path::Path, out: &std::path::Path, live: Arc<Mutex<Live
     }));
     let timer = slint::Timer::default();
     let r2 = runner.clone();
-    timer.start(slint::TimerMode::Repeated, Duration::from_millis(1), move || {
-        let mut r = r2.borrow_mut();
-        let now = Instant::now();
-        if let Some((name, rc, until)) = r.burst.clone() {
-            if now < until {
-                let t = now.saturating_duration_since(r.mark).as_millis() as u32;
-                let shot = WINDOW.with(|w| w.borrow().as_ref().map(|ui| crop(ui, rc)));
-                if let Some(Ok((w, h, d))) = shot {
-                    r.frames.push((format!("{name}-{t:05}"), w, h, d));
-                }
-                return;
-            }
-            r.burst = None;
-        }
-        if now < r.wait_until {
-            return;
-        }
-        while r.i < r.steps.len() {
-            let a = r.steps[r.i].clone();
-            r.i += 1;
-            let arg = |i: usize| a.get(i).cloned().unwrap_or_default();
-            let num = |i: usize| arg(i).parse::<f32>().unwrap_or(0.0);
-            let pos = || LogicalPosition::new(num(1), num(2));
-            let dispatch = |e: WindowEvent| with_ui(|ui| ui.window().dispatch_event(e));
-            match a[0].as_str() {
-                "state" => {
-                    super::preview::action("state", &arg(1));
-                    sync(&live);
-                }
-                "page" => with_ui(|ui| {
-                    let p = num(1) as i32;
-                    ui.set_page(p);
-                    ui.invoke_switch_page(p);
-                }),
-                "pane" => with_ui(|ui| ui.set_conn_pane(num(1) as i32)),
-                "reduced" => with_ui(|ui| ui.set_reduced_motion(arg(1) == "1")),
-                "toast" => toast(&a[1..].join(" ")),
-                "toggle" => super::preview::command(MenuCommand::ToggleRun),
-                "move" => dispatch(WindowEvent::PointerMoved { position: pos() }),
-                "leave" => dispatch(WindowEvent::PointerExited),
-                "down" => dispatch(WindowEvent::PointerPressed { position: pos(), button: PointerEventButton::Left }),
-                "up" => dispatch(WindowEvent::PointerReleased { position: pos(), button: PointerEventButton::Left }),
-                "click" => {
-                    dispatch(WindowEvent::PointerMoved { position: pos() });
-                    dispatch(WindowEvent::PointerPressed { position: pos(), button: PointerEventButton::Left });
-                    dispatch(WindowEvent::PointerReleased { position: pos(), button: PointerEventButton::Left });
-                }
-                "keydown" => dispatch(WindowEvent::KeyPressed { text: key_text(&arg(1)) }),
-                "keyup" => dispatch(WindowEvent::KeyReleased { text: key_text(&arg(1)) }),
-                "mark" => {}
-                "wait" => {
-                    r.wait_until = Instant::now() + Duration::from_millis(num(1) as u64);
-                    return;
-                }
-                "cap" => {
-                    let rc = rect(&a);
-                    let name = arg(1);
+    timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(1),
+        move || {
+            let mut r = r2.borrow_mut();
+            let now = Instant::now();
+            if let Some((name, rc, until)) = r.burst.clone() {
+                if now < until {
+                    let t = now.saturating_duration_since(r.mark).as_millis() as u32;
                     let shot = WINDOW.with(|w| w.borrow().as_ref().map(|ui| crop(ui, rc)));
                     if let Some(Ok((w, h, d))) = shot {
-                        r.frames.push((name, w, h, d));
+                        r.frames.push((format!("{name}-{t:05}"), w, h, d));
                     }
-                    continue;
-                }
-                "burst" => {
-                    let rc = rect(&a);
-                    let until = Instant::now() + Duration::from_millis(num(6) as u64);
-                    r.burst = Some((arg(1), rc, until));
                     return;
                 }
-                other => eprintln!("script: unknown step {other}"),
+                r.burst = None;
             }
-            // Every input/action step resets the burst clock: bursts are timed from the last action.
-            r.mark = Instant::now();
-        }
-        let out = r.out.clone();
-        let frames = std::mem::take(&mut r.frames);
-        for (name, w, h, d) in &frames {
-            if let Err(e) = write_ppm(&out.join(format!("{name}.ppm")), *w, *h, d) {
-                eprintln!("script: write {name}: {e}");
+            if now < r.wait_until {
+                return;
             }
-        }
-        println!("script: {} frames", frames.len());
-        let _ = slint::quit_event_loop();
-    });
+            while r.i < r.steps.len() {
+                let a = r.steps[r.i].clone();
+                r.i += 1;
+                let arg = |i: usize| a.get(i).cloned().unwrap_or_default();
+                let num = |i: usize| arg(i).parse::<f32>().unwrap_or(0.0);
+                let pos = || LogicalPosition::new(num(1), num(2));
+                let dispatch = |e: WindowEvent| with_ui(|ui| ui.window().dispatch_event(e));
+                match a[0].as_str() {
+                    "state" => {
+                        super::preview::action("state", &arg(1));
+                        sync(&live);
+                    }
+                    "page" => with_ui(|ui| {
+                        let p = num(1) as i32;
+                        ui.set_page(p);
+                        ui.invoke_switch_page(p);
+                    }),
+                    "pane" => with_ui(|ui| ui.set_conn_pane(num(1) as i32)),
+                    "reduced" => with_ui(|ui| ui.set_reduced_motion(arg(1) == "1")),
+                    "toast" => toast(&a[1..].join(" ")),
+                    "toggle" => super::preview::command(MenuCommand::ToggleRun),
+                    "move" => dispatch(WindowEvent::PointerMoved { position: pos() }),
+                    "leave" => dispatch(WindowEvent::PointerExited),
+                    "down" => dispatch(WindowEvent::PointerPressed {
+                        position: pos(),
+                        button: PointerEventButton::Left,
+                    }),
+                    "up" => dispatch(WindowEvent::PointerReleased {
+                        position: pos(),
+                        button: PointerEventButton::Left,
+                    }),
+                    "click" => {
+                        dispatch(WindowEvent::PointerMoved { position: pos() });
+                        dispatch(WindowEvent::PointerPressed {
+                            position: pos(),
+                            button: PointerEventButton::Left,
+                        });
+                        dispatch(WindowEvent::PointerReleased {
+                            position: pos(),
+                            button: PointerEventButton::Left,
+                        });
+                    }
+                    "keydown" => dispatch(WindowEvent::KeyPressed {
+                        text: key_text(&arg(1)),
+                    }),
+                    "keyup" => dispatch(WindowEvent::KeyReleased {
+                        text: key_text(&arg(1)),
+                    }),
+                    "mark" => {}
+                    "wait" => {
+                        r.wait_until = Instant::now() + Duration::from_millis(num(1) as u64);
+                        return;
+                    }
+                    "cap" => {
+                        let rc = rect(&a);
+                        let name = arg(1);
+                        let shot = WINDOW.with(|w| w.borrow().as_ref().map(|ui| crop(ui, rc)));
+                        if let Some(Ok((w, h, d))) = shot {
+                            r.frames.push((name, w, h, d));
+                        }
+                        continue;
+                    }
+                    "burst" => {
+                        let rc = rect(&a);
+                        let until = Instant::now() + Duration::from_millis(num(6) as u64);
+                        r.burst = Some((arg(1), rc, until));
+                        return;
+                    }
+                    other => eprintln!("script: unknown step {other}"),
+                }
+                // Every input/action step resets the burst clock: bursts are timed from the last action.
+                r.mark = Instant::now();
+            }
+            let out = r.out.clone();
+            let frames = std::mem::take(&mut r.frames);
+            for (name, w, h, d) in &frames {
+                if let Err(e) = write_ppm(&out.join(format!("{name}.ppm")), *w, *h, d) {
+                    eprintln!("script: write {name}: {e}");
+                }
+            }
+            println!("script: {} frames", frames.len());
+            let _ = slint::quit_event_loop();
+        },
+    );
     slint::run_event_loop_until_quit().map_err(|e| e.to_string())?;
     drop(timer);
     stop_motion();

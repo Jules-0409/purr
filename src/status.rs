@@ -115,8 +115,11 @@ fn footprint_bytes_impl(pid: u32) -> Option<u64> {
     #[link(name = "kernel32")]
     unsafe extern "system" {
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
-        fn K32GetProcessMemoryInfo(process: *mut c_void, counters: *mut CountersEx2, size: u32)
-            -> i32;
+        fn K32GetProcessMemoryInfo(
+            process: *mut c_void,
+            counters: *mut CountersEx2,
+            size: u32,
+        ) -> i32;
         fn CloseHandle(handle: *mut c_void) -> i32;
     }
     unsafe {

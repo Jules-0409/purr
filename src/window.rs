@@ -827,15 +827,28 @@ fn start_motion() {
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs_f64();
-                        let t = if reduced { 0.0 } else { (t / 0.35).floor() * 0.35 };
+                        let t = if reduced {
+                            0.0
+                        } else {
+                            (t / 0.35).floor() * 0.35
+                        };
                         let key = format!("{kind}:{t:.2}");
                         if ASCII_KEY.with(|k| *k.borrow() != key) {
                             ASCII_KEY.with(|k| *k.borrow_mut() = key);
-                            let rows = present::ascii_cat(&kind, ((t / 0.45) as i64) % 2 == 1, (t * 2.8).sin() * 0.06)
-                                .into_iter()
-                                .map(|(row, alpha, text)| AsciiRow { row, alpha, text: text.into() })
-                                .collect::<Vec<_>>();
-                            ui.global::<S>().set_ascii(ModelRc::new(VecModel::from(rows)));
+                            let rows = present::ascii_cat(
+                                &kind,
+                                ((t / 0.45) as i64) % 2 == 1,
+                                (t * 2.8).sin() * 0.06,
+                            )
+                            .into_iter()
+                            .map(|(row, alpha, text)| AsciiRow {
+                                row,
+                                alpha,
+                                text: text.into(),
+                            })
+                            .collect::<Vec<_>>();
+                            ui.global::<S>()
+                                .set_ascii(ModelRc::new(VecModel::from(rows)));
                         }
                     }
                 }
@@ -901,7 +914,10 @@ fn start_motion() {
                 } else {
                     let progress = 1.0 - (-9.5 * since).exp() * (14.0 * since).cos();
                     let velocity = (target_x - start_x).abs() * (-9.5 * since).exp();
-                    (start_x + (target_x - start_x) * progress, (velocity / 260.0).min(1.0))
+                    (
+                        start_x + (target_x - start_x) * progress,
+                        (velocity / 260.0).min(1.0),
+                    )
                 };
                 ex = next_x;
                 ev = if speed > 0.0 { speed } else { 0.0 };
@@ -988,8 +1004,8 @@ fn start_motion() {
                     }
                 }
 
-                let chart_phase = (awake && !reduced && ui.get_mode() != "direct")
-                    .then_some(millis);
+                let chart_phase =
+                    (awake && !reduced && ui.get_mode() != "direct").then_some(millis);
                 let chart_changed = chart_phase.is_some() != last_plot.3
                     || history != last_plot.0
                     || ui.get_chart_w() != last_plot.1
@@ -1069,8 +1085,12 @@ fn fit_to_work_area(ui: &MainWindow) {
         fn GetMonitorInfoW(h_monitor: *mut c_void, lpmi: *mut MONITORINFO) -> i32;
     }
     let placed = ui.window().with_winit_window(|w| {
-        let Ok(handle) = w.window_handle() else { return None };
-        let RawWindowHandle::Win32(handle) = handle.as_raw() else { return None };
+        let Ok(handle) = w.window_handle() else {
+            return None;
+        };
+        let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+            return None;
+        };
         let hwnd = handle.hwnd.get();
         let mut mi = MONITORINFO {
             cb_size: std::mem::size_of::<MONITORINFO>() as u32,
@@ -1085,9 +1105,13 @@ fn fit_to_work_area(ui: &MainWindow) {
         }
         let work = mi.rc_work;
         let scale = w.scale_factor().max(1.0);
-        let (work_w, work_h) = ((work.right - work.left) as f64, (work.bottom - work.top) as f64);
+        let (work_w, work_h) = (
+            (work.right - work.left) as f64,
+            (work.bottom - work.top) as f64,
+        );
         let margin = 12.0 * scale;
-        let fit = |want: f64, min: f64, avail: f64| want.min(avail - 2.0 * margin).max(min.min(avail));
+        let fit =
+            |want: f64, min: f64, avail: f64| want.min(avail - 2.0 * margin).max(min.min(avail));
         let width = fit(1200.0 * scale, 1000.0 * scale, work_w).round();
         let height = fit(760.0 * scale, 560.0 * scale, work_h).round();
         let left = work.left + ((work_w - width) / 2.0).round() as i32;
@@ -1098,8 +1122,10 @@ fn fit_to_work_area(ui: &MainWindow) {
     });
     // Mirror through Slint's own window API so its cached geometry agrees with the native window.
     if let Some(Some((width, height, left, top))) = placed {
-        ui.window().set_size(slint::PhysicalSize::new(width, height));
-        ui.window().set_position(slint::PhysicalPosition::new(left, top));
+        ui.window()
+            .set_size(slint::PhysicalSize::new(width, height));
+        ui.window()
+            .set_position(slint::PhysicalPosition::new(left, top));
     }
 }
 
@@ -1174,14 +1200,22 @@ fn apply_frame_shape(ui: &MainWindow) {
     }
     let win11 = is_windows_11();
     let shaped = ui.window().with_winit_window(|w| {
-        let Ok(handle) = w.window_handle() else { return None };
-        let RawWindowHandle::Win32(handle) = handle.as_raw() else { return None };
+        let Ok(handle) = w.window_handle() else {
+            return None;
+        };
+        let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+            return None;
+        };
         let hwnd = handle.hwnd.get();
         let maximized = w.is_maximized() || unsafe { IsZoomed(hwnd) } != 0;
         let scale = w.scale_factor().max(1.0);
         unsafe {
             if win11 {
-                let pref: u32 = if maximized { 1 /* DWMWCP_DONOTROUND */ } else { 2 /* DWMWCP_ROUND */ };
+                let pref: u32 = if maximized {
+                    1 /* DWMWCP_DONOTROUND */
+                } else {
+                    2 /* DWMWCP_ROUND */
+                };
                 let _ = DwmSetWindowAttribute(hwnd, 33, (&pref as *const u32).cast(), 4);
                 // The drawn hairline is the border, as on macOS; no second system border.
                 let none: u32 = 0xFFFF_FFFE; // DWMWA_COLOR_NONE
@@ -1192,7 +1226,8 @@ fn apply_frame_shape(ui: &MainWindow) {
                 let mut r = RECT::default();
                 if GetWindowRect(hwnd, &mut r) != 0 {
                     let d = (2.0 * 12.0 * scale).round() as i32;
-                    let rgn = CreateRoundRectRgn(0, 0, r.right - r.left + 1, r.bottom - r.top + 1, d, d);
+                    let rgn =
+                        CreateRoundRectRgn(0, 0, r.right - r.left + 1, r.bottom - r.top + 1, d, d);
                     if rgn != 0 {
                         // The system owns the region after this call.
                         let _ = SetWindowRgn(hwnd, rgn, 1);
@@ -1435,7 +1470,11 @@ fn apply(ui: &MainWindow, state: &LiveState) {
             _ => "分流",
         };
         ui.set_now_purring_desc(
-            format!("睡着了：系统代理已还原，内核仍在 {} 端口待命。醒来后按 {mode} 走。", state.preferences.mixed_port).into(),
+            format!(
+                "睡着了：系统代理已还原，内核仍在 {} 端口待命。醒来后按 {mode} 走。",
+                state.preferences.mixed_port
+            )
+            .into(),
         );
     }
     if !PREVIEW_MODE.with(Cell::get) {
@@ -1673,7 +1712,9 @@ fn auto_test_selected_group() {
     if PREVIEW_MODE.with(Cell::get) {
         return;
     }
-    let Some(live) = LIVE.with(|l| l.borrow().clone()) else { return };
+    let Some(live) = LIVE.with(|l| l.borrow().clone()) else {
+        return;
+    };
     let name = {
         let s = live.lock().unwrap();
         if !s.awake {
@@ -1687,7 +1728,9 @@ fn auto_test_selected_group() {
     };
     let due = AUTO_TESTED.with(|m| {
         let mut m = m.borrow_mut();
-        let ok = m.get(&name).is_none_or(|t| t.elapsed() >= Duration::from_secs(20));
+        let ok = m
+            .get(&name)
+            .is_none_or(|t| t.elapsed() >= Duration::from_secs(20));
         if ok {
             m.insert(name.clone(), Instant::now());
         }
@@ -1786,7 +1829,8 @@ fn publish_spectrum(ui: &MainWindow, state: &LiveState) {
         ui.set_current_group_name(group.name.as_str().into());
         // 顶栏徽章始终是主组当前节点（与 Mac currentPrimaryNode 同源，名字和延迟一起）；
         // 窝点页「当前 组 → 节点」单独写 g-now-a，不再覆盖徽章的名字。
-        ui.global::<S>().set_g_now_a(group.now_label.as_str().into());
+        ui.global::<S>()
+            .set_g_now_a(group.now_label.as_str().into());
     }
     let heights = [252.0, 204.0, 156.0, 108.0, 62.0];
     let mut sorted_nodes = group
@@ -2120,19 +2164,34 @@ pub(crate) fn spark_paths(history: &[Option<f32>]) -> (String, String, f32) {
     for (i, v) in history.iter().enumerate() {
         let x = x_at(i);
         if let Some(v) = v {
-            path.push_str(&format!("{} {x:.2} {:.2} ", if drawing { "L" } else { "M" }, y_at(*v)));
+            path.push_str(&format!(
+                "{} {x:.2} {:.2} ",
+                if drawing { "L" } else { "M" },
+                y_at(*v)
+            ));
             drawing = true;
         } else {
             drawing = false;
             failures.push_str(&format!(
                 "M{:.2} {:.2} L{:.2} {:.2} M{:.2} {:.2} L{:.2} {:.2} ",
-                x - 3.0, h - 7.0, x + 3.0, h - 1.0, x + 3.0, h - 7.0, x - 3.0, h - 1.0
+                x - 3.0,
+                h - 7.0,
+                x + 3.0,
+                h - 1.0,
+                x + 3.0,
+                h - 7.0,
+                x - 3.0,
+                h - 1.0
             ));
         }
     }
     (
         if path.is_empty() { "M0 0".into() } else { path },
-        if failures.is_empty() { "M0 0".into() } else { failures },
+        if failures.is_empty() {
+            "M0 0".into()
+        } else {
+            failures
+        },
         y_at(avg),
     )
 }

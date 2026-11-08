@@ -129,7 +129,10 @@ fn wide(s: &str) -> Vec<u16> {
 /// The open "hidden icons" overflow flyout, if any (Windows 11 XAML island or the
 /// classic Windows 10 `NotifyIconOverflowWindow`).
 pub fn overflow_rect() -> Option<Rect> {
-    for class in ["TopLevelWindowForOverflowXamlIsland", "NotifyIconOverflowWindow"] {
+    for class in [
+        "TopLevelWindowForOverflowXamlIsland",
+        "NotifyIconOverflowWindow",
+    ] {
         let class = wide(class);
         unsafe {
             let hwnd = FindWindowW(class.as_ptr(), std::ptr::null());
@@ -165,7 +168,12 @@ fn monitor_for(pt: (i32, i32)) -> (Rect, Rect) {
         if !hmon.is_null() && GetMonitorInfoW(hmon, &mut mi) != 0 {
             (mi.rc_monitor, mi.rc_work)
         } else {
-            let r = Rect { left: 0, top: 0, right: 1920, bottom: 1032 };
+            let r = Rect {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1032,
+            };
             (r, r)
         }
     }
@@ -182,7 +190,9 @@ fn taskbar(mon: &Rect, work: &Rect) -> (Edge, Option<Rect>) {
         rc: Rect::default(),
         l_param: 0,
     };
-    let ok = unsafe { SHAppBarMessage(5 /* ABM_GETTASKBARPOS */, &mut abd) } != 0;
+    let ok = unsafe {
+        SHAppBarMessage(5 /* ABM_GETTASKBARPOS */, &mut abd)
+    } != 0;
     if ok && abd.rc.intersects(mon) {
         let edge = match abd.u_edge {
             0 => Edge::Left,
@@ -249,7 +259,12 @@ pub fn place_in(
         Edge::Right => (max_x, (pt.1 - height / 2).clamp(min_y, max_y)),
     };
     if let Some(ov) = avoid {
-        let r = Rect { left, top, right: left + width, bottom: top + height };
+        let r = Rect {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        };
         if r.intersects(&ov) {
             let before = ov.left - margin - width; // to the left of the flyout
             let after = ov.right + margin; // to the right of the flyout
@@ -358,7 +373,13 @@ struct Watch {
 }
 
 impl Watch {
-    const IDLE: Watch = Watch { had_fg: false, esc: true, opened: None, entered: false, out_since: None };
+    const IDLE: Watch = Watch {
+        had_fg: false,
+        esc: true,
+        opened: None,
+        entered: false,
+        out_since: None,
+    };
 }
 
 /// Where the tray icon was clicked (physical px); the pointer resting there does not count
@@ -398,8 +419,8 @@ unsafe extern "system" fn mouse_hook(code: i32, w: usize, l: isize) -> isize {
             if hwnd != 0 {
                 let info = unsafe { &*(l as *const MsLlHookStruct) };
                 let mut r = Rect::default();
-                let inside = unsafe { GetWindowRect(hwnd, &mut r) } != 0
-                    && r.contains(info.pt.x, info.pt.y);
+                let inside =
+                    unsafe { GetWindowRect(hwnd, &mut r) } != 0 && r.contains(info.pt.x, info.pt.y);
                 if !inside && !OUTSIDE.swap(true, Ordering::Relaxed) {
                     let _ = slint::invoke_from_event_loop(|| {
                         mark_auto_dismiss();
@@ -419,11 +440,20 @@ pub fn arm(hwnd: isize) {
     // Esc may already be down if the user opened the menu with a keyboard; only a new press counts.
     let esc_down = unsafe { GetAsyncKeyState(0x1B) } as u16 & 0x8000 != 0;
     WATCH.with(|w| {
-        w.set(Watch { esc: esc_down, opened: Some(Instant::now()), ..Watch::IDLE })
+        w.set(Watch {
+            esc: esc_down,
+            opened: Some(Instant::now()),
+            ..Watch::IDLE
+        })
     });
     if HOOK.load(Ordering::Relaxed) == 0 {
         let hook = unsafe {
-            SetWindowsHookExW(14 /* WH_MOUSE_LL */, mouse_hook, GetModuleHandleW(std::ptr::null()), 0)
+            SetWindowsHookExW(
+                14, /* WH_MOUSE_LL */
+                mouse_hook,
+                GetModuleHandleW(std::ptr::null()),
+                0,
+            )
         };
         HOOK.store(hook, Ordering::Relaxed);
     }
@@ -489,12 +519,18 @@ pub fn poll() -> bool {
             let dpi = unsafe { GetDpiForWindow(hwnd) };
             let half = 20 * if dpi == 0 { 96 } else { dpi as i32 } / 96;
             let (ax, ay) = ANCHOR.with(|c| c.get());
-            let icon = Rect { left: ax - half, top: ay - half, right: ax + half, bottom: ay + half };
+            let icon = Rect {
+                left: ax - half,
+                top: ay - half,
+                right: ax + half,
+                bottom: ay + half,
+            };
             icon.contains(cx, cy) || overflow_rect().is_some_and(|o| o.contains(cx, cy))
         };
         let now = Instant::now();
         let opened = *w.opened.get_or_insert(now);
-        let (c, entered, out_since) = hover_step(now, opened, w.entered, w.out_since, in_popup, in_safe);
+        let (c, entered, out_since) =
+            hover_step(now, opened, w.entered, w.out_since, in_popup, in_safe);
         w.entered = entered;
         w.out_since = out_since;
         close = c;
@@ -508,13 +544,38 @@ mod tests {
     use super::*;
 
     // 1920x1200 physical monitor at 125 %, 48 px bottom taskbar.
-    const MON: Rect = Rect { left: 0, top: 0, right: 1920, bottom: 1200 };
-    const WORK: Rect = Rect { left: 0, top: 0, right: 1920, bottom: 1152 };
-    const BAR: Rect = Rect { left: 0, top: 1152, right: 1920, bottom: 1200 };
+    const MON: Rect = Rect {
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 1200,
+    };
+    const WORK: Rect = Rect {
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 1152,
+    };
+    const BAR: Rect = Rect {
+        left: 0,
+        top: 1152,
+        right: 1920,
+        bottom: 1200,
+    };
 
     #[test]
     fn bottom_taskbar_sits_above_bar_anchored_on_icon() {
-        let (l, t, up) = place_in((1700, 1160), 385, 600, 10, MON, WORK, Edge::Bottom, Some(BAR), None);
+        let (l, t, up) = place_in(
+            (1700, 1160),
+            385,
+            600,
+            10,
+            MON,
+            WORK,
+            Edge::Bottom,
+            Some(BAR),
+            None,
+        );
         assert!(up);
         assert_eq!(t + 600, 1152 - 10);
         assert_eq!(l, 1700 - 192);
@@ -522,15 +583,45 @@ mod tests {
 
     #[test]
     fn clamps_to_right_edge() {
-        let (l, _, _) = place_in((1900, 1160), 385, 600, 10, MON, WORK, Edge::Bottom, Some(BAR), None);
+        let (l, _, _) = place_in(
+            (1900, 1160),
+            385,
+            600,
+            10,
+            MON,
+            WORK,
+            Edge::Bottom,
+            Some(BAR),
+            None,
+        );
         assert_eq!(l + 385, 1920 - 10);
     }
 
     #[test]
     fn avoids_open_overflow_flyout() {
-        let ov = Rect { left: 1600, top: 1000, right: 1800, bottom: 1140 };
-        let (l, t, _) = place_in((1700, 1080), 385, 600, 10, MON, WORK, Edge::Bottom, Some(BAR), Some(ov));
-        let r = Rect { left: l, top: t, right: l + 385, bottom: t + 600 };
+        let ov = Rect {
+            left: 1600,
+            top: 1000,
+            right: 1800,
+            bottom: 1140,
+        };
+        let (l, t, _) = place_in(
+            (1700, 1080),
+            385,
+            600,
+            10,
+            MON,
+            WORK,
+            Edge::Bottom,
+            Some(BAR),
+            Some(ov),
+        );
+        let r = Rect {
+            left: l,
+            top: t,
+            right: l + 385,
+            bottom: t + 600,
+        };
         assert!(!r.intersects(&ov));
         assert!(t + 600 <= 1152);
     }
@@ -558,15 +649,40 @@ mod tests {
 
     #[test]
     fn top_left_right_taskbars() {
-        let work = Rect { left: 0, top: 48, right: 1920, bottom: 1200 };
+        let work = Rect {
+            left: 0,
+            top: 48,
+            right: 1920,
+            bottom: 1200,
+        };
         let (_, t, up) = place_in((1700, 20), 385, 600, 10, MON, work, Edge::Top, None, None);
         assert!(!up);
         assert_eq!(t, 58);
-        let work = Rect { left: 60, top: 0, right: 1920, bottom: 1200 };
+        let work = Rect {
+            left: 60,
+            top: 0,
+            right: 1920,
+            bottom: 1200,
+        };
         let (l, _, _) = place_in((30, 1100), 385, 600, 10, MON, work, Edge::Left, None, None);
         assert_eq!(l, 70);
-        let work = Rect { left: 0, top: 0, right: 1860, bottom: 1200 };
-        let (l, _, _) = place_in((1890, 1100), 385, 600, 10, MON, work, Edge::Right, None, None);
+        let work = Rect {
+            left: 0,
+            top: 0,
+            right: 1860,
+            bottom: 1200,
+        };
+        let (l, _, _) = place_in(
+            (1890, 1100),
+            385,
+            600,
+            10,
+            MON,
+            work,
+            Edge::Right,
+            None,
+            None,
+        );
         assert_eq!(l + 385, 1850);
     }
 }

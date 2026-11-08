@@ -6,7 +6,9 @@ use super::*;
 mod tray_win;
 
 pub(super) fn tray_nodes(state: &LiveState) -> Vec<TrayNode> {
-    let Some(group) = main_group(state) else { return vec![] };
+    let Some(group) = main_group(state) else {
+        return vec![];
+    };
     // Nested groups (a fallback "🇺🇸 US" inside "🌍 出口") are real choices: list them with the
     // delay of the node they currently use. Only DIRECT/REJECT/relay-like entries are hidden.
     let mut nodes = group
@@ -55,13 +57,17 @@ fn auto_test_tray(state: &LiveState) {
         return;
     }
     let nodes = tray_nodes(state);
-    let Some(group) = nodes.first().map(|n| n.group.to_string()) else { return };
+    let Some(group) = nodes.first().map(|n| n.group.to_string()) else {
+        return;
+    };
     if !nodes.iter().any(|n| n.delay.as_str() == "—") {
         return;
     }
     let due = AUTO_TESTED.with(|m| {
         let mut m = m.borrow_mut();
-        let ok = m.get(&group).is_none_or(|t| t.elapsed() >= Duration::from_secs(20));
+        let ok = m
+            .get(&group)
+            .is_none_or(|t| t.elapsed() >= Duration::from_secs(20));
         if ok {
             m.insert(group.clone(), Instant::now());
         }
@@ -81,8 +87,8 @@ pub(super) fn apply_tray(ui: &TrayWindow, state: &LiveState) {
         ui.global::<Theme>().set_shortcut("Ctrl+".into());
         ui.global::<Theme>().set_sans("Segoe UI".into());
         ui.global::<Theme>().set_mono("Consolas".into());
-            // SF Mono advances 0.619 em, Consolas 0.550 em: track the difference so widths match macOS.
-            ui.global::<Theme>().set_mono_track(0.069);
+        // SF Mono advances 0.619 em, Consolas 0.550 em: track the difference so widths match macOS.
+        ui.global::<Theme>().set_mono_track(0.069);
     }
     let first = state
         .groups
@@ -102,7 +108,13 @@ pub(super) fn apply_tray(ui: &TrayWindow, state: &LiveState) {
         .map(|(ip, _)| ip)
         .filter(|ip| ip.chars().next().is_some_and(|c| c.is_ascii_hexdigit()))
         .unwrap_or("");
-    let with_ip = |s: String| if ip.is_empty() { s } else { format!("{s} · {ip}") };
+    let with_ip = |s: String| {
+        if ip.is_empty() {
+            s
+        } else {
+            format!("{s} · {ip}")
+        }
+    };
     ui.set_subtitle(
         if first {
             "先导入订阅".to_string()
@@ -247,21 +259,22 @@ pub fn toggle(x: i32, y: i32) {
         }
         _ => {}
     });
-    let (first_run, has_trouble, nodes_len) =
-        if let Some(state) = LIVE.with(|s| s.borrow().as_ref().map(|s| s.lock().unwrap().clone())) {
-            let first = state
-                .groups
-                .iter()
-                .all(|g| g.nodes.iter().all(|n| present::skip_delay(&n.kind)))
-                && state.preferences.subscription.is_none();
-            let has_trouble = !state.trouble.is_empty();
-            let nodes_len = tray_nodes(&state).len();
-            apply_tray(&ui, &state);
-            auto_test_tray(&state);
-            (first, has_trouble, nodes_len)
-        } else {
-            (true, false, 0)
-        };
+    let (first_run, has_trouble, nodes_len) = if let Some(state) =
+        LIVE.with(|s| s.borrow().as_ref().map(|s| s.lock().unwrap().clone()))
+    {
+        let first = state
+            .groups
+            .iter()
+            .all(|g| g.nodes.iter().all(|n| present::skip_delay(&n.kind)))
+            && state.preferences.subscription.is_none();
+        let has_trouble = !state.trouble.is_empty();
+        let nodes_len = tray_nodes(&state).len();
+        apply_tray(&ui, &state);
+        auto_test_tray(&state);
+        (first, has_trouble, nodes_len)
+    } else {
+        (true, false, 0)
+    };
     let fallback_h = 63.0
         + if has_trouble { 76.0 } else { 0.0 }
         + if first_run {
@@ -325,13 +338,7 @@ pub fn toggle(x: i32, y: i32) {
     TRAY_TIMER.with(|s| *s.borrow_mut() = Some(timer));
 }
 
-fn position_tray_window(
-    ui: &TrayWindow,
-    x: i32,
-    y: i32,
-    fallback_logical_h: f32,
-    focus: bool,
-) {
+fn position_tray_window(ui: &TrayWindow, x: i32, y: i32, fallback_logical_h: f32, focus: bool) {
     let desired = ui.get_desired_height();
     let logical_h = if desired > 100.0 {
         desired
@@ -428,7 +435,10 @@ fn position_tray_window(
                         } else {
                             0x0010 | 0x0004 /* SWP_NOACTIVATE | SWP_NOZORDER */
                         };
-                        let _ = SetWindowPos(hwnd, -1 /* HWND_TOPMOST */, left, top, width, height, flags);
+                        let _ = SetWindowPos(
+                            hwnd, -1, /* HWND_TOPMOST */
+                            left, top, width, height, flags,
+                        );
                         let _ = focus;
                     }
                 }

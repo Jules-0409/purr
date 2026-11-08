@@ -664,7 +664,10 @@ pub fn chart(hist: &[(u64, u64)], width: f32, height: f32, phase: Option<f32>) -
 /// Members a speed test probes: real nodes and nested groups (mihomo measures a group through the
 /// node it currently uses, e.g. a fallback "🇺🇸 US" inside "🌍 出口"); never DIRECT/REJECT/relay.
 pub fn probe_delay(kind: &str) -> bool {
-    !matches!(kind, "direct" | "reject" | "compatible" | "pass" | "relay" | "—")
+    !matches!(
+        kind,
+        "direct" | "reject" | "compatible" | "pass" | "relay" | "—"
+    )
 }
 
 pub fn skip_delay(kind: &str) -> bool {
@@ -944,23 +947,50 @@ pub fn ascii_cat(kind: &str, alt: bool, tail: f64) -> Vec<(i32, f32, String)> {
                 let in_body = d_body <= 1.0 && y <= 0.62;
                 let d_paws = ((x + 0.42) / 0.34).hypot((y - 0.46) / 0.18);
                 let in_paws = d_paws <= 1.0 && y <= 0.62;
-                let in_tail = tail_dist(x, y, &[(0.74, 0.35), (0.95, 0.48 + tail), (0.85, 0.64), (0.45, 0.66)]) < 0.085;
+                let in_tail = tail_dist(
+                    x,
+                    y,
+                    &[
+                        (0.74, 0.35),
+                        (0.95, 0.48 + tail),
+                        (0.85, 0.64),
+                        (0.45, 0.66),
+                    ],
+                ) < 0.085;
                 if kind == "timeout" {
-                    if (x - 0.10).hypot(y + 0.55) < 0.045 { return Some(('.', 0.65)); }
-                    if (x - 0.28).hypot(y + 0.65) < 0.055 { return Some(('o', if alt { 0.85 } else { 0.40 })); }
-                    if (x - 0.48).hypot(y + 0.75) < 0.065 { return Some(('O', if alt { 0.40 } else { 0.95 })); }
+                    if (x - 0.10).hypot(y + 0.55) < 0.045 {
+                        return Some(('.', 0.65));
+                    }
+                    if (x - 0.28).hypot(y + 0.65) < 0.055 {
+                        return Some(('o', if alt { 0.85 } else { 0.40 }));
+                    }
+                    if (x - 0.48).hypot(y + 0.75) < 0.065 {
+                        return Some(('O', if alt { 0.40 } else { 0.95 }));
+                    }
                 }
-                if !(d_head <= 1.0 || in_ear || in_body || in_paws || in_tail) { return None; }
-                if ((x + 0.42) / 0.28).hypot((y + 0.02) / 0.22) < 1.0 { return Some(('.', 0.22)); }
-                if (d_head - 0.96).abs() < 0.08 && x > -0.18 && y < 0.25 { return None; }
+                if !(d_head <= 1.0 || in_ear || in_body || in_paws || in_tail) {
+                    return None;
+                }
+                if ((x + 0.42) / 0.28).hypot((y + 0.02) / 0.22) < 1.0 {
+                    return Some(('.', 0.22));
+                }
+                if (d_head - 0.96).abs() < 0.08 && x > -0.18 && y < 0.25 {
+                    return None;
+                }
                 Some(shade(x, y))
             }
             "offline" | "sub" => {
                 let d_head = ((x + 0.20) / 0.40).hypot((y + 0.30) / 0.34);
                 let (el, er): (&[(f64, f64)], &[(f64, f64)]) = if kind == "sub" {
-                    (&[(-0.56, -0.38), (-0.66, -0.76), (-0.28, -0.56)], &[(-0.12, -0.56), (0.26, -0.76), (0.16, -0.38)])
+                    (
+                        &[(-0.56, -0.38), (-0.66, -0.76), (-0.28, -0.56)],
+                        &[(-0.12, -0.56), (0.26, -0.76), (0.16, -0.38)],
+                    )
                 } else {
-                    (&[(-0.54, -0.44), (-0.48, -0.92), (-0.24, -0.56)], &[(-0.16, -0.56), (0.08, -0.92), (0.14, -0.44)])
+                    (
+                        &[(-0.54, -0.44), (-0.48, -0.92), (-0.24, -0.56)],
+                        &[(-0.16, -0.56), (0.08, -0.92), (0.14, -0.44)],
+                    )
                 };
                 let in_ear = in_poly(x, y, el) || in_poly(x, y, er);
                 let by = (y - 0.32) / 0.56;
@@ -968,38 +998,142 @@ pub fn ascii_cat(kind: &str, alt: bool, tail: f64) -> Vec<(i32, f32, String)> {
                 let d_body = ((x + 0.12) / bw).hypot(by);
                 let d_paw1 = ((x + 0.34) / 0.13).hypot((y - 0.83) / 0.10);
                 let d_paw2 = ((x + 0.08) / 0.13).hypot((y - 0.83) / 0.10);
-                let in_tail = tail_dist(x, y, &[(0.20, 0.76), (0.48, 0.72), (0.66 + tail, 0.45), (0.68 + tail, 0.08), (0.58 - tail, -0.22), (0.72 - tail, -0.38)]) < 0.095;
+                let in_tail = tail_dist(
+                    x,
+                    y,
+                    &[
+                        (0.20, 0.76),
+                        (0.48, 0.72),
+                        (0.66 + tail, 0.45),
+                        (0.68 + tail, 0.08),
+                        (0.58 - tail, -0.22),
+                        (0.72 - tail, -0.38),
+                    ],
+                ) < 0.095;
                 if kind == "offline" {
-                    if (x + 0.72).hypot(y + 0.65) < 0.06 { return Some(('?', if alt { 0.95 } else { 0.45 })); }
-                    if (x - 0.32).hypot(y + 0.68) < 0.06 { return Some(('?', if alt { 0.45 } else { 0.95 })); }
+                    if (x + 0.72).hypot(y + 0.65) < 0.06 {
+                        return Some(('?', if alt { 0.95 } else { 0.45 }));
+                    }
+                    if (x - 0.32).hypot(y + 0.68) < 0.06 {
+                        return Some(('?', if alt { 0.45 } else { 0.95 }));
+                    }
                 } else if y > 0.68 && y < 0.88 && x > -0.95 && x < -0.52 {
                     return Some(if y < 0.74 { ('_', 0.75) } else { ('=', 0.85) });
                 }
-                if !(d_head <= 1.0 || in_ear || (d_body <= 1.0 && y > -0.15) || d_paw1 <= 1.0 || d_paw2 <= 1.0 || in_tail) { return None; }
-                if ((x + 0.20) / 0.29).hypot((y + 0.26) / 0.21) < 1.0 { return Some(('.', 0.22)); }
+                if !(d_head <= 1.0
+                    || in_ear
+                    || (d_body <= 1.0 && y > -0.15)
+                    || d_paw1 <= 1.0
+                    || d_paw2 <= 1.0
+                    || in_tail)
+                {
+                    return None;
+                }
+                if ((x + 0.20) / 0.29).hypot((y + 0.26) / 0.21) < 1.0 {
+                    return Some(('.', 0.22));
+                }
                 Some(shade(x, y))
             }
             _ => {
                 let d_head = ((x + 0.52) / 0.34).hypot((y + 0.08) / 0.32);
                 let in_ear = in_poly(x, y, &[(-0.80, -0.22), (-0.75, -0.72), (-0.55, -0.32)])
                     || in_poly(x, y, &[(-0.48, -0.32), (-0.28, -0.72), (-0.23, -0.22)]);
-                let in_spine = tail_dist(x, y, &[(-0.35, 0.05), (-0.12, -0.35), (0.12, -0.45), (0.35, -0.30), (0.52, 0.08)]) < 0.24;
-                let leg = |x1: f64, y1: f64, x2: f64, y2: f64| dist_seg(x, y, x1, y1, x2, y2) < 0.085;
-                let legs = leg(-0.42, 0.15, -0.46, 0.78) || leg(-0.25, 0.15, -0.26, 0.78) || leg(0.35, 0.15, 0.34, 0.78) || leg(0.52, 0.12, 0.55, 0.78);
-                let in_tail = tail_dist(x, y, &[(0.54, 0.02), (0.72 + tail, -0.35), (0.68 - tail, -0.78), (0.78, -0.88)]) < 0.12;
-                if (x + 0.10).hypot(y + 0.75) < 0.06 { return Some(('!', if alt { 1.0 } else { 0.5 })); }
-                if !(d_head <= 1.0 || in_ear || in_spine || legs || in_tail) { return None; }
-                if ((x + 0.52) / 0.25).hypot((y + 0.05) / 0.20) < 1.0 { return Some(('.', 0.22)); }
+                let in_spine = tail_dist(
+                    x,
+                    y,
+                    &[
+                        (-0.35, 0.05),
+                        (-0.12, -0.35),
+                        (0.12, -0.45),
+                        (0.35, -0.30),
+                        (0.52, 0.08),
+                    ],
+                ) < 0.24;
+                let leg =
+                    |x1: f64, y1: f64, x2: f64, y2: f64| dist_seg(x, y, x1, y1, x2, y2) < 0.085;
+                let legs = leg(-0.42, 0.15, -0.46, 0.78)
+                    || leg(-0.25, 0.15, -0.26, 0.78)
+                    || leg(0.35, 0.15, 0.34, 0.78)
+                    || leg(0.52, 0.12, 0.55, 0.78);
+                let in_tail = tail_dist(
+                    x,
+                    y,
+                    &[
+                        (0.54, 0.02),
+                        (0.72 + tail, -0.35),
+                        (0.68 - tail, -0.78),
+                        (0.78, -0.88),
+                    ],
+                ) < 0.12;
+                if (x + 0.10).hypot(y + 0.75) < 0.06 {
+                    return Some(('!', if alt { 1.0 } else { 0.5 }));
+                }
+                if !(d_head <= 1.0 || in_ear || in_spine || legs || in_tail) {
+                    return None;
+                }
+                if ((x + 0.52) / 0.25).hypot((y + 0.05) / 0.20) < 1.0 {
+                    return Some(('.', 0.22));
+                }
                 Some(shade(x, y))
             }
         }
     };
     let stamps: (usize, usize, Vec<String>) = match kind {
-        "empty" => (9, 9, vec!["  ===   ===  ".into(), "=           =".into(), "    _w_      ".into()]),
-        "timeout" => (9, 9, vec!["  \\       /  ".into(), "=  >  .  <  =".into(), "  /  _w_  \\  ".into()]),
-        "offline" => (6, 13, vec!["  .-.   .-.  ".into(), if alt { "= (.@) (.@) =" } else { "= (@.) (@.) =" }.into(), "   ` _w_ `   ".into()]),
-        "sub" => (6, 13, vec!["  ___   ___  ".into(), if alt { "=  T,   ,T  =" } else { "=  T;   ;T  =" }.into(), "    ,---,    ".into()]),
-        _ => (9, 8, vec![" \\       / ".into(), "=(@) . (@)=".into(), "  /^^^^^\\  ".into()]),
+        "empty" => (
+            9,
+            9,
+            vec![
+                "  ===   ===  ".into(),
+                "=           =".into(),
+                "    _w_      ".into(),
+            ],
+        ),
+        "timeout" => (
+            9,
+            9,
+            vec![
+                "  \\       /  ".into(),
+                "=  >  .  <  =".into(),
+                "  /  _w_  \\  ".into(),
+            ],
+        ),
+        "offline" => (
+            6,
+            13,
+            vec![
+                "  .-.   .-.  ".into(),
+                if alt {
+                    "= (.@) (.@) ="
+                } else {
+                    "= (@.) (@.) ="
+                }
+                .into(),
+                "   ` _w_ `   ".into(),
+            ],
+        ),
+        "sub" => (
+            6,
+            13,
+            vec![
+                "  ___   ___  ".into(),
+                if alt {
+                    "=  T,   ,T  ="
+                } else {
+                    "=  T;   ;T  ="
+                }
+                .into(),
+                "    ,---,    ".into(),
+            ],
+        ),
+        _ => (
+            9,
+            8,
+            vec![
+                " \\       / ".into(),
+                "=(@) . (@)=".into(),
+                "  /^^^^^\\  ".into(),
+            ],
+        ),
     };
     let mut face = std::collections::HashMap::new();
     for (dr, line) in stamps.2.iter().enumerate() {
@@ -1021,7 +1155,10 @@ pub fn ascii_cat(kind: &str, alt: bool, tail: f64) -> Vec<(i32, f32, String)> {
             };
             let Some((ch, alpha)) = cell else { continue };
             let a = (alpha * 100.0).round() as f32 / 100.0;
-            let slot = match layers.iter().position(|l| l.0 == r as i32 && (l.1 - a).abs() < 0.001) {
+            let slot = match layers
+                .iter()
+                .position(|l| l.0 == r as i32 && (l.1 - a).abs() < 0.001)
+            {
                 Some(i) => i,
                 None => {
                     layers.push((r as i32, a, vec![' '; COLS]));
@@ -1033,7 +1170,13 @@ pub fn ascii_cat(kind: &str, alt: bool, tail: f64) -> Vec<(i32, f32, String)> {
     }
     layers
         .into_iter()
-        .map(|(r, a, chars)| (r, a, chars.into_iter().collect::<String>().trim_end().to_string()))
+        .map(|(r, a, chars)| {
+            (
+                r,
+                a,
+                chars.into_iter().collect::<String>().trim_end().to_string(),
+            )
+        })
         .collect()
 }
 
