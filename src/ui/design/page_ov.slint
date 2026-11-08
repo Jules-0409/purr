@@ -471,7 +471,7 @@ export component OverviewPage inherits Rectangle {
             // the leading rule only spans the panel's content (overlay on the padded VStack)
             Rectangle { x: 0; y: 0; width: 1.5px; height: 12px + side-col.preferred-height; background: T.ink; }
             side-col := VerticalLayout {
-                x: 24px; y: 12px; width: parent.width - 24px; spacing: 12px; alignment: start;
+                x: 24px; y: 12px; width: parent.width - 24px; spacing: 18px; alignment: start;
                 VerticalLayout { spacing: 8px;
                     Text { text: "TODAY · 去向"; font-family: T.mono; font-size: 11px; letter-spacing: 1.6px + 11px * T.mt; color: T.mute; height: 14px; vertical-alignment: center; }
                     // stripes (line colour, 1.5 px, every 6 px), ink share, 1.5 px centred outline
@@ -512,18 +512,20 @@ export component OverviewPage inherits Rectangle {
                         Text { text: S.subi-warn ? "⚠ 已过期 · 窝点全部停用" : S.sub-detail; font-family: T.mono; font-size: 11.5px; letter-spacing: 11.5px * T.mt; color: S.subi-warn ? T.ink : T.mute; vertical-alignment: bottom; height: 14px; }
                     }
                 }
-                // SERVICES · 常用网站：按每个网站实际分流真测，停在概览时每 60 秒自动重测（与 Mac 同规则）
+                // SERVICES · 常用网站：按每个网站实际分流真测，停在概览时每 60 秒自动重测（与 Mac 同规则）。
+                // 概览只放前 4 个（2x2），其余收进「+N ▸」，点开详情弹窗看全部 8 个；不加行，窗口高度不变。
                 Rectangle {
-                    height: 14px + 5px + 4 * 20px + 3 * 3px;
+                    height: 14px + 5px + 2 * 20px + 1 * 3px;
                     VerticalLayout {
                         spacing: 5px;
-                        HorizontalLayout { height: 14px;
+                        HorizontalLayout { height: 14px; spacing: 8px;
                             Text { text: "SERVICES · 常用网站"; font-family: T.mono; font-size: 11px; letter-spacing: 1.6px + 11px * T.mt; color: T.mute; vertical-alignment: center; }
                             Rectangle { horizontal-stretch: 1; }
                             Text { text: S.sites-testing ? "检测中…" : ""; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; color: T.mute; vertical-alignment: center; }
+                            Text { text: S.sites.length > 4 ? "+" + (S.sites.length - 4) + " ▸" : ""; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: center; }
                         }
                         VerticalLayout { spacing: 3px;
-                            for ri in 4: HorizontalLayout {
+                            for ri in 2: HorizontalLayout {
                                 spacing: 8px; height: 20px;
                                 for ci in 2: Rectangle {
                                     property <SiteRow> item: S.sites[ri * 2 + ci];

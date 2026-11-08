@@ -567,9 +567,10 @@ struct OverviewPageView: View {
             }
 
             // SERVICES · 常用网站：mihomo 按每个网站实际分流真测（PurrStore.probeServices），
-            // 停在概览时每 60 秒自动重测；没测到的显示「—」。点开看出口与线路详情。
+            // 停在概览时每 60 秒自动重测；没测到的显示「—」。概览只放前 4 个（2x2），
+            // 其余收进「+N ▸」，点开原详情弹窗看全部（8 个都测）。不加行，窗口高度不变。
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("SERVICES · 常用网站")
                         .font(.system(size: 11, design: .monospaced))
                         .tracking(1.6)
@@ -580,9 +581,14 @@ struct OverviewPageView: View {
                             .font(.system(size: 10.5, design: .monospaced))
                             .foregroundColor(theme.mute)
                     }
+                    if store.serviceProbes.count > 4 {
+                        Text("+\(store.serviceProbes.count - 4) ▸")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(theme.ink)
+                    }
                 }
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 4) {
-                    ForEach(store.serviceProbes) { svc in
+                    ForEach(Array(store.serviceProbes.prefix(4))) { svc in
                         HStack(spacing: 6) {
                             Text(svc.name)
                                 .font(.system(size: 12, weight: .bold))

@@ -54,6 +54,9 @@ struct PurrMainView: View {
                 .padding(.vertical, 28)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
+            // 保险：页面内容万一超高，只往下溢出被裁掉，顶栏（红绿灯 + 状态徽章）始终贴窗口顶
+            .frame(width: 1200, height: 760, alignment: .top)
+            .clipped()
 
             // Full-window Service Status & Exit IP Diagnostics Modal (covers TopBar + EarBand + Pages)
             if store.showServiceDetail {
@@ -81,6 +84,8 @@ struct PurrMainView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.black.opacity(0.14), lineWidth: 1)
         )
+        // 屏幕太矮、窗口被收到可见区域以内时：内容顶对齐，只裁底部
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -311,6 +316,7 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
         window.level = .normal
         mountMainContentView()
         window.center()
+        clampWindowToVisibleScreen()
         window.orderFrontRegardless()
 
         store.onTogglePin = { [weak self] pinned in
@@ -330,6 +336,30 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
 
         setupTray()
         setupKeyboardMonitors()
+
+        // 无边框窗口系统不会自动限位：拖动结束 / 换屏 / 改分辨率后都把窗口收回可见区域
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            // 拖动时只拦顶部（不让标题栏钻进菜单栏/刘海），左右下随用户拖
+            self?.clampWindowToVisibleScreen(topOnly: true)
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeScreenNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.clampWindowToVisibleScreen()
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.clampWindowToVisibleScreen()
+        }
 
         NotificationCenter.default.addObserver(
             forName: NSWindow.didChangeOcclusionStateNotification,
@@ -352,6 +382,8 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
     private func mountMainContentView() {
         if window.contentView is NSHostingView<PurrMainView> { return }
         let hostingView = NSHostingView(rootView: PurrMainView(store: store))
+        // 窗口尺寸由 clampWindowToVisibleScreen 决定，不让 SwiftUI 内容把窗口撑高
+        hostingView.sizingOptions = []
         hostingView.wantsLayer = true
         hostingView.layer?.cornerRadius = 12
         hostingView.layer?.cornerCurve = .continuous
@@ -368,8 +400,32 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
         malloc_zone_pressure_relief(nil, 0)
     }
 
+    /// 把窗口 frame 限制在当前屏幕的 visibleFrame 内（不进菜单栏/刘海、不压 Dock）。
+    /// 屏幕放不下 1200x760 时把窗口缩到可见区域（内容顶对齐，底部被裁）。
+    private func clampWindowToVisibleScreen(topOnly: Bool = false) {
+        guard let window = window,
+              let screen = window.screen ?? NSScreen.main ?? NSScreen.screens.first else { return }
+        let vf = screen.visibleFrame
+        var f = window.frame
+        if topOnly {
+            if f.maxY > vf.maxY {
+                f.origin.y = vf.maxY - f.height
+                window.setFrameOrigin(f.origin)
+            }
+            return
+        }
+        f.size.width = min(1200, vf.width)
+        f.size.height = min(760, vf.height)
+        if f.maxY > vf.maxY { f.origin.y = vf.maxY - f.height }
+        if f.minY < vf.minY { f.origin.y = vf.minY }
+        if f.maxX > vf.maxX { f.origin.x = vf.maxX - f.width }
+        if f.minX < vf.minX { f.origin.x = vf.minX }
+        if f != window.frame { window.setFrame(f, display: true) }
+    }
+
     private func restoreWindowFromTray() {
         mountMainContentView()
+        clampWindowToVisibleScreen()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
