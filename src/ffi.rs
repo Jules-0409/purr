@@ -1387,9 +1387,10 @@ pub extern "C" fn purr_core_flush_dns() -> c_int {
             .arg("-flushcache")
             .status();
         if status.is_ok_and(|s| s.success()) {
-            return 0;
+            0
+        } else {
+            -1
         }
-        return -1;
     }
     #[cfg(not(target_os = "macos"))]
     {

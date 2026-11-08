@@ -31,15 +31,12 @@ pub(super) fn wire(ui: &MainWindow) {
 
     ui.global::<S>()
         .on_probe_sites(|force| send(MenuCommand::ProbeSites(force)));
-    // 启动时停在概览：等内核就绪后自动测一次常用网站
-    slint::Timer::single_shot(Duration::from_secs(5), || {
-        send(MenuCommand::ProbeSites(false))
-    });
+    start_overview_probe();
     ui.global::<S>().on_go(|page| {
-        if page == 0 {
-            send(MenuCommand::ProbeSites(false));
-        }
         with_ui(|ui| {
+            if overview_probe_wanted(ui, page) {
+                send(MenuCommand::ProbeSites(false));
+            }
             ui.set_page(page);
             ui.invoke_switch_page(page);
         })
@@ -187,4 +184,34 @@ pub(super) fn groups(ui: &MainWindow, state: &LiveState, index: usize) {
         }
         .into(),
     );
+}
+
+thread_local! {
+    /// 概览页常用网站的自动重测心跳（与 Mac `serviceAutoTimer` 同规则）。
+    static OVERVIEW_PROBE: slint::Timer = slint::Timer::default();
+}
+
+/// 窗口在、没最小化、停在概览、猫醒着时才自动测常用网站。
+fn overview_probe_wanted(ui: &MainWindow, page: i32) -> bool {
+    let window = ui.window();
+    window.is_visible() && !window.is_minimized() && page == 0 && ui.get_awake()
+}
+
+/// 每 5 秒看一眼；真正发测由 tray 端 `probe::THROTTLE`（60 秒）节流，
+/// 所以停在概览时每 60 秒重测一次。窗口关到托盘（被销毁）后定时器自己停掉，下次开窗再启。
+fn start_overview_probe() {
+    OVERVIEW_PROBE.with(|timer| {
+        timer.start(slint::TimerMode::Repeated, Duration::from_secs(5), || {
+            let mut window_alive = false;
+            with_ui(|ui| {
+                window_alive = true;
+                if overview_probe_wanted(ui, ui.get_page()) {
+                    send(MenuCommand::ProbeSites(false));
+                }
+            });
+            if !window_alive {
+                OVERVIEW_PROBE.with(|timer| timer.stop());
+            }
+        });
+    });
 }

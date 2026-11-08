@@ -21,7 +21,7 @@ pub const SITES: [(&str, &str, &str); 8] = [
     ("apple", "Apple", "www.apple.com"),
 ];
 
-/// 节流：自动测两次之间至少隔这么久（手动「重测」不受限）。
+/// 节流：自动测两次之间至少隔这么久（手动「重测」不受限）。概览页停留时也按这个间隔自动重测。
 pub const THROTTLE: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -41,6 +41,8 @@ impl SiteProbe {
     pub fn ms_text(&self) -> String {
         match self.ms {
             Some(ms) => format!("{ms}ms"),
+            // 连走哪条路都没查到（内核没就绪）：拿不到就是「—」，不算超时
+            None if self.group.is_empty() => "—".into(),
             None => "超时".into(),
         }
     }
@@ -189,4 +191,26 @@ pub async fn probe_all(api: &Api, port: u16, mode: &str) -> Vec<SiteProbe> {
         started.elapsed().as_millis()
     );
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SiteProbe;
+
+    fn probe(group: &str, ms: Option<u32>) -> SiteProbe {
+        SiteProbe {
+            group: group.into(),
+            ms,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ms_text_never_invents_a_number() {
+        assert_eq!(probe("节点选择", Some(123)).ms_text(), "123ms");
+        // 路由查到了但测速没回：超时
+        assert_eq!(probe("DIRECT", None).ms_text(), "超时");
+        // 连路由都没查到（内核没就绪）：拿不到，显示「—」
+        assert_eq!(probe("", None).ms_text(), "—");
+    }
 }

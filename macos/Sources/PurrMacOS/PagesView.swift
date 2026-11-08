@@ -566,8 +566,45 @@ struct OverviewPageView: View {
                 Rectangle().fill(theme.line).frame(height: 1)
             }
 
-            // SERVICES grid removed: per-site latency probing is not wired to the core yet,
-            // so it showed made-up numbers. The exit-IP details stay reachable from the IP chip.
+            // SERVICES · 常用网站：mihomo 按每个网站实际分流真测（PurrStore.probeServices），
+            // 停在概览时每 60 秒自动重测；没测到的显示「—」。点开看出口与线路详情。
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("SERVICES · 常用网站")
+                        .font(.system(size: 11, design: .monospaced))
+                        .tracking(1.6)
+                        .foregroundColor(theme.mute)
+                    Spacer()
+                    if store.isTestingServices {
+                        Text("检测中…")
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundColor(theme.mute)
+                    }
+                }
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 4) {
+                    ForEach(store.serviceProbes) { svc in
+                        HStack(spacing: 6) {
+                            Text(svc.name)
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(theme.ink)
+                                .lineLimit(1)
+                            Spacer(minLength: 4)
+                            Circle()
+                                .fill(theme.ink)
+                                .frame(width: 5, height: 5)
+                                .opacity(svc.ms > 0 ? 0.9 : 0.3)
+                            Text(svc.msText)
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundColor(svc.ms > 0 ? theme.ink : theme.mute)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(theme.line, lineWidth: 1))
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { store.showServiceDetail = true }
         }
         .padding(.top, 12)
         .padding(.leading, 24)

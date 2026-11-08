@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import AppKit
 import AVFoundation
 import Darwin
@@ -204,7 +205,10 @@ final class PurrSynth {
 // MARK: - PurrStore (Complete State Engine backed by Rust + mihomo)
 final class PurrStore: ObservableObject {
     @Published var isAwake: Bool = false {
-        didSet { if !PurrSnapshot.active { purr_core_set_awake(isAwake) } }
+        didSet {
+            if !PurrSnapshot.active { purr_core_set_awake(isAwake) }
+            if isAwake != oldValue { updateServiceAutoProbe() }
+        }
     }
     @Published var firstRun: Bool = false
     @Published var errKind: String? = nil // "timeout", "offline", "sub", "port"
@@ -230,8 +234,8 @@ final class PurrStore: ObservableObject {
             pageChangedAt = PurrClock.now()
             // 打开窝点页时自动测一次速（未测过的显示「—」，不再用假数字）
             if page == 1 && oldValue != 1 { autoSpeedTest() }
-            // 进概览自动测一次常用网站（60 秒节流）
-            if page == 0 && oldValue != 0 { probeServices() }
+            // 概览页常用网站：进概览自动测一次，停在概览时每 60 秒重测（离开即停）
+            if page != oldValue { updateServiceAutoProbe() }
         }
     }
     var prevPage: Int = 0
@@ -715,6 +719,50 @@ final class PurrStore: ObservableObject {
     ]
 
     private var lastServiceProbeAt: Date? = nil
+    /// 概览页自动重测的心跳：每 5 秒看一眼，真正发测由 probeServices 的 60 秒节流决定。
+    private var serviceAutoTimer: Timer? = nil
+    /// Mac 整机睡眠中（NSWorkspace willSleep → didWake）。
+    private var systemAsleep: Bool = false
+
+    /// 窗口可见、停在概览、猫醒着、电脑没睡时才自动测；任一条件不满足就停掉定时器。
+    func updateServiceAutoProbe() {
+        let want = !PurrSnapshot.active
+            && page == 0
+            && isAwake
+            && !systemAsleep
+            && PurrVisibility.shared.mainWindowVisible
+        if want {
+            guard serviceAutoTimer == nil else { return }
+            probeServices()
+            let t = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+                self?.probeServices()
+            }
+            t.tolerance = 1
+            RunLoop.main.add(t, forMode: .common)
+            serviceAutoTimer = t
+        } else {
+            serviceAutoTimer?.invalidate()
+            serviceAutoTimer = nil
+        }
+    }
+
+    private func observeServiceAutoProbeConditions() {
+        visibilityCancellable = PurrVisibility.shared.$mainWindowVisible
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.updateServiceAutoProbe() }
+        let ws = NSWorkspace.shared.notificationCenter
+        ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.systemAsleep = true
+            self?.updateServiceAutoProbe()
+        }
+        ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.systemAsleep = false
+            // 刚醒网络还没恢复，晚几秒再开
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self?.updateServiceAutoProbe() }
+        }
+    }
+    private var visibilityCancellable: AnyCancellable? = nil
     /// 常用网站真测：按每个网站实际走的分流（规则匹配出的组/节点，直连走 DIRECT）
     /// 调 mihomo `/proxies/{组}/delay?url=<网站>&timeout=5000`。自动触发 60 秒节流。
     func probeServices(force: Bool = false) {
@@ -736,7 +784,8 @@ final class PurrStore: ObservableObject {
                         let node = site["node"] as? String ?? ""
                         let via = site["via"] as? String ?? (group.isEmpty ? "" : (group == "DIRECT" ? "直连" : (node.isEmpty ? group : "\(group) › \(node)")))
                         let ms = (site["ms"] as? NSNumber)?.intValue ?? -1
-                        parsed[id] = (via, ms > 0 ? ms : -1)
+                        // 连走哪条路都没查到（内核没就绪）：拿不到就是「—」，不算超时
+                        parsed[id] = (via, ms > 0 ? ms : (group.isEmpty ? 0 : -1))
                     }
                 }
             }
@@ -747,6 +796,10 @@ final class PurrStore: ObservableObject {
                         self.serviceProbes[i].routeGroup = r.0
                         self.serviceProbes[i].ms = r.1
                     }
+                }
+                // 内核还没就绪（一条路由都没查到）就不计满节流，15 秒后重试
+                if !parsed.values.contains(where: { !$0.0.isEmpty }) {
+                    self.lastServiceProbeAt = Date().addingTimeInterval(-45)
                 }
                 self.isTestingServices = false
             }
@@ -788,9 +841,10 @@ final class PurrStore: ObservableObject {
         plog("purr", "PURR 内核已就绪")
         syncSnapshotFromCore()
         startTimers()
-        // 启动时停在概览：等内核就绪后自动测一次常用网站
+        observeServiceAutoProbeConditions()
+        // 启动时停在概览：等内核就绪后开始自动测常用网站
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-            if self?.page == 0 { self?.probeServices() }
+            self?.updateServiceAutoProbe()
         }
     }
 

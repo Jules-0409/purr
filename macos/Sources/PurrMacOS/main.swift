@@ -362,6 +362,8 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
     /// Releases the 1200x760 window backing buffers so standby memory drops to ~20-30 MB
     private func suspendWindowToTray() {
         window.orderOut(nil)
+        // 关到托盘：停掉概览页常用网站的自动重测（开窗后遮挡通知会再置回可见）
+        PurrVisibility.shared.mainWindowVisible = false
         window.contentView = NSView(frame: .zero)
         malloc_zone_pressure_relief(nil, 0)
     }
