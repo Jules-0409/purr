@@ -134,8 +134,8 @@ export component NativeTray inherits Rectangle {
             Rectangle { x: 0; y: 0; width: parent.width; height: 1px; background: T.line; }
             HorizontalLayout { x: 16px; y: 9px; width: parent.width - 32px; height: 26px;
                 VerticalLayout { alignment: center; spacing: 1px;
-                    Text { text: "↑ " + root.up + " MB/s"; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; color: T.mute; height: 13px; vertical-alignment: center; }
-                    Text { text: "↓ " + root.down + " MB/s"; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; font-weight: 700; color: T.ink; height: 13px; vertical-alignment: center; }
+                    Text { text: "↑ " + root.up; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; color: T.mute; height: 13px; vertical-alignment: center; }
+                    Text { text: "↓ " + root.down; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; font-weight: 700; color: T.ink; height: 13px; vertical-alignment: center; }
                 }
                 Rectangle { horizontal-stretch: 1; }
                 Text { text: "内存 " + root.memory + " MB"; font-family: T.mono; font-size: 10.5px; letter-spacing: 10.5px * T.mt; color: T.mute; vertical-alignment: center; }

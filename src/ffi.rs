@@ -233,6 +233,33 @@ fn prepare_yaml_text(api: &Api, prefs: &Preferences, text: &str) -> Result<Strin
     ))
 }
 
+/// Whether the first-launch notice was accepted. Safe to call before `purr_core_init`.
+#[no_mangle]
+pub extern "C" fn purr_core_disclaimer_accepted() -> bool {
+    crate::config::app_config_dir()
+        .map(|dir| crate::settings::disclaimer_accepted(&dir))
+        .unwrap_or(false)
+}
+
+/// Checks the typed phrase and records the acceptance. 0 = saved, -1 = wrong phrase, -2 = write failed.
+#[no_mangle]
+pub extern "C" fn purr_core_accept_disclaimer(typed: *const c_char) -> c_int {
+    if typed.is_null() {
+        return -1;
+    }
+    let typed = unsafe { CStr::from_ptr(typed) }.to_string_lossy();
+    if !crate::settings::disclaimer_input_matches(&typed) {
+        return -1;
+    }
+    match crate::config::app_config_dir().and_then(|dir| crate::settings::accept_disclaimer(&dir)) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("purr_core_accept_disclaimer: {e}");
+            -2
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn purr_core_init() -> c_int {
     if CTX.get().is_some() {
@@ -317,6 +344,8 @@ async fn background_loop(api: Api, state: Arc<Mutex<FfiState>>, initial_awake: b
         }
     });
 
+    tokio::spawn(reject_log_loop(api.clone(), Arc::clone(&state)));
+
     let mut last_place_check = Instant::now() - Duration::from_secs(60);
     let mut tick_count = 0u64;
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
@@ -344,6 +373,32 @@ async fn background_loop(api: Api, state: Arc<Mutex<FfiState>>, initial_awake: b
                 }
             });
         }
+    }
+}
+
+/// Counts rule-rejected connections (the 抓老鼠 number) from the core's info log.
+async fn reject_log_loop(api: Api, state: Arc<Mutex<FfiState>>) {
+    use tokio_tungstenite::tungstenite::Message;
+    loop {
+        if let Ok(mut socket) = api.websocket("/logs?level=info").await {
+            while let Some(Ok(message)) = socket.next().await {
+                let text = match message {
+                    Message::Text(t) => t.to_string(),
+                    Message::Binary(b) => String::from_utf8_lossy(&b).into_owned(),
+                    _ => continue,
+                };
+                let Ok(value) = serde_json::from_str::<Value>(&text) else {
+                    continue;
+                };
+                let payload = value.get("payload").and_then(Value::as_str).unwrap_or("");
+                if crate::present::is_reject_log(payload) {
+                    if let Ok(mut g) = state.lock() {
+                        g.blocked_count = g.blocked_count.saturating_add(1);
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 }
 
@@ -526,14 +581,10 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
                     || last_chain.eq_ignore_ascii_case("REJECT");
 
                 let prev = g.seen_conn_bytes.insert(id.clone(), (down, up));
+                // Rejected connections never reach /connections; they are counted from the log stream.
                 let delta = match prev {
                     Some((pd, pu)) => down.saturating_sub(pd) + up.saturating_sub(pu),
-                    None => {
-                        if is_reject {
-                            g.blocked_count = g.blocked_count.saturating_add(1);
-                        }
-                        down + up
-                    }
+                    None => down + up,
                 };
                 if is_direct {
                     g.direct_bytes = g.direct_bytes.saturating_add(delta);

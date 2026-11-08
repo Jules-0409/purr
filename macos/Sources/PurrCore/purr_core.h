@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 
+bool purr_core_disclaimer_accepted(void);
+int32_t purr_core_accept_disclaimer(const char* typed);
 int32_t purr_core_init(void);
 void purr_core_shutdown(void);
 bool purr_core_is_awake(void);

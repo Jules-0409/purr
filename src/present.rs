@@ -141,8 +141,26 @@ pub fn format_hms(seconds: u64) -> String {
     )
 }
 
+/// Speed for display. Below 1 MiB/s it switches to KB/s: one decimal of MB/s rounds every
+/// ordinary browsing rate (under ~50 KB/s) down to "0.0".
 pub fn rate_parts(bytes: u64) -> (String, String) {
-    (format!("{:.1}", bytes as f64 / 1048576.), "MB/s".into())
+    if bytes >= 1024 * 1024 {
+        (format!("{:.1}", bytes as f64 / 1048576.), "MB/s".into())
+    } else {
+        (format!("{:.0}", bytes as f64 / 1024.), "KB/s".into())
+    }
+}
+pub fn rate_text(bytes: u64) -> String {
+    let (value, unit) = rate_parts(bytes);
+    format!("{value} {unit}")
+}
+/// mihomo logs every rule-rejected connection at info level ("... match X using REJECT").
+/// Rejected connections are closed before they are tracked, so `/connections` never shows them.
+///
+/// UDP rejects are left out: they are mostly QUIC (UDP 443) being pushed back to TCP, retried
+/// many times per page, and would swamp the ads/trackers count.
+pub fn is_reject_log(payload: &str) -> bool {
+    payload.contains(" using REJECT") && !payload.starts_with("[UDP]")
 }
 pub fn size_text(bytes: u64) -> String {
     const KB: f64 = 1024.0;
@@ -1208,7 +1226,25 @@ mod tests {
             rate_parts(5 * 1024 * 1024),
             ("5.0".to_string(), "MB/s".to_string())
         );
-        assert_eq!(rate_parts(1536), ("0.0".to_string(), "MB/s".to_string()));
+        assert_eq!(rate_parts(1536), ("2".to_string(), "KB/s".to_string()));
+        assert_eq!(rate_parts(0), ("0".to_string(), "KB/s".to_string()));
+        assert_eq!(
+            rate_parts(30 * 1024),
+            ("30".to_string(), "KB/s".to_string())
+        );
+        assert_eq!(rate_text(1024 * 1024), "1.0 MB/s");
+        assert!(is_reject_log(
+            "[TCP] 127.0.0.1:56829 --> stats.g.doubleclick.net:443 match DomainSuffix(doubleclick.net) using REJECT"
+        ));
+        assert!(is_reject_log(
+            "[TCP] 198.18.0.1:5 --> x.example:443 match GeoSite(category-ads-all) using REJECT-DROP"
+        ));
+        assert!(!is_reject_log(
+            "[UDP] 198.18.0.1:57581(DoubaoIme) --> 106.38.222.182:443 match AND(((Network,udp))) using REJECT"
+        ));
+        assert!(!is_reject_log(
+            "[TCP] 127.0.0.1:1 --> github.com:443 match Match using 🌍 出口[东京]"
+        ));
         assert_eq!(size_text(1024), "1 KB");
     }
 

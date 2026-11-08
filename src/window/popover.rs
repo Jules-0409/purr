@@ -131,9 +131,9 @@ pub(super) fn apply_tray(ui: &TrayWindow, state: &LiveState) {
     );
     ui.set_metrics(
         format!(
-            "↓ {:.1}  ↑ {:.1} MB/s · 内存 {:.0} MB · 今日 {}",
-            state.down_bps as f64 / 1048576.,
-            state.up_bps as f64 / 1048576.,
+            "↓ {}  ↑ {} · 内存 {:.0} MB · 今日 {}",
+            speed(state, state.down_bps),
+            speed(state, state.up_bps),
             (state.memory_shell + state.memory_core) as f64 / 1_048_576.0,
             present::size_text(state.telemetry.down + state.telemetry.up)
         )
@@ -144,8 +144,8 @@ pub(super) fn apply_tray(ui: &TrayWindow, state: &LiveState) {
     ui.set_trouble_title(title.into());
     ui.set_trouble_action(action.into());
     ui.set_countdown(countdown(state).into());
-    ui.set_down(format!("{:.1}", state.down_bps as f64 / 1048576.).into());
-    ui.set_up(format!("{:.1}", state.up_bps as f64 / 1048576.).into());
+    ui.set_down(speed(state, state.down_bps).into());
+    ui.set_up(speed(state, state.up_bps).into());
     ui.set_memory(
         format!(
             "{:.0}",
@@ -493,4 +493,12 @@ fn dismiss() {
             }
         });
     });
+}
+
+fn speed(state: &LiveState, bytes: u64) -> String {
+    if state.traffic_live {
+        present::rate_text(bytes)
+    } else {
+        "—".into()
+    }
 }

@@ -6,6 +6,20 @@ import Darwin
 import PurrCore
 
 // MARK: - Theme Tokens (matching PURR-desktop-v5.html :root)
+/// Speed text. Below 1 MB/s it switches to KB/s: one decimal of MB/s turns every ordinary
+/// browsing rate (under ~50 KB/s) into "0.0".
+enum PurrRate {
+    static func parts(_ mbPerSec: Double) -> (String, String) {
+        if mbPerSec >= 1.0 { return (String(format: "%.1f", mbPerSec), "MB/s") }
+        return (String(format: "%.0f", max(0, mbPerSec) * 1024.0), "KB/s")
+    }
+    /// Menu-bar form, at most 5 characters after the arrow.
+    static func compact(_ mbPerSec: Double) -> String {
+        if mbPerSec >= 1.0 { return String(format: "%4.1fM", mbPerSec) }
+        return String(format: "%4.0fK", max(0, mbPerSec) * 1024.0)
+    }
+}
+
 struct PurrTheme {
     let bg: Color
     let ink: Color
@@ -276,6 +290,10 @@ final class PurrStore: ObservableObject {
 
     // Live metrics (synced from mihomo via purr_core_snapshot_json)
     @Published var dnSpeed: Double = 0.0
+    /// The core's controller answered the last poll; speeds show "—" otherwise.
+    @Published var statsReady: Bool = false
+    /// First-launch notice not accepted yet: the core, system proxy and TUN stay untouched.
+    @Published var disclaimerPending: Bool = false
     @Published var upSpeed: Double = 0.0
     @Published var load: Double = 0.0
     @Published var peakDn: Double = 0.0
@@ -832,6 +850,34 @@ final class PurrStore: ObservableObject {
     init() {
         seedPlaceholderNodes()
         if PurrSnapshot.active { return }
+        if !purr_core_disclaimer_accepted() {
+            disclaimerPending = true
+            return
+        }
+        bootCore()
+    }
+
+    /// Records the typed confirmation, then starts everything init() held back.
+    @discardableResult
+    func acceptDisclaimer(_ typed: String) -> Bool {
+        guard disclaimerPending else { return true }
+        let rc = typed.withCString { purr_core_accept_disclaimer($0) }
+        guard rc == 0 else { return false }
+        disclaimerPending = false
+        bootCore()
+        return true
+    }
+
+    func rateParts(_ mbPerSec: Double) -> (String, String) {
+        statsReady ? PurrRate.parts(mbPerSec) : ("—", "")
+    }
+
+    func rateText(_ mbPerSec: Double) -> String {
+        let p = rateParts(mbPerSec)
+        return p.1.isEmpty ? p.0 : "\(p.0) \(p.1)"
+    }
+
+    private func bootCore() {
         _ = purr_core_init()
         loadPersistedPreferences()
         if autoWake {
@@ -926,6 +972,7 @@ final class PurrStore: ObservableObject {
 
     // Hold to wake / sleep
     func beginHold() {
+        if disclaimerPending { return }
         if firstRun && !isAwake {
             showToast("先给它一个窝 · 导入订阅")
             page = 0
@@ -946,6 +993,7 @@ final class PurrStore: ObservableObject {
     }
 
     func wake() {
+        if disclaimerPending { return }
         if soundMode == "ping" {
             pingUntil = PurrClock.now() + 1.5
         }
@@ -1205,6 +1253,7 @@ final class PurrStore: ObservableObject {
         if let dMb = snap["direct_mb"] as? Double {
             self.totalDirectMB = dMb
         }
+        self.statsReady = snap["ready"] as? Bool ?? false
         if let blocked = snap["blocked_count"] as? Int {
             self.blockedMice = blocked
         }

@@ -99,6 +99,14 @@ fn run() -> Result<(), String> {
     if !locked {
         return Err("PURR 已经在运行，请使用托盘菜单打开主窗口".to_string());
     }
+    slint::BackendSelector::new()
+        .renderer_name(window::renderer_name())
+        .select()
+        .map_err(|err| err.to_string())?;
+    // Nothing (core, system proxy, TUN) starts until the first-launch notice is accepted.
+    if !settings::disclaimer_accepted(&dir) && !window::disclaimer::run(&dir)? {
+        return Ok(());
+    }
     proxy::restore();
     let settings = config::prepare()?;
     let api = Api::new(settings.secret.clone());
@@ -130,11 +138,6 @@ fn run() -> Result<(), String> {
                 serve(commands_rx, api, shared_worker, live_worker, core).await;
             });
         })
-        .map_err(|err| err.to_string())?;
-
-    slint::BackendSelector::new()
-        .renderer_name(window::renderer_name())
-        .select()
         .map_err(|err| err.to_string())?;
 
     let actions = Arc::new(Mutex::new(MenuActions::new()));

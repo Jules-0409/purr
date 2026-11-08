@@ -26,6 +26,34 @@ impl Api {
         }
     }
 
+    /// Opens a controller websocket such as `/traffic` or `/logs?level=info`.
+    pub async fn websocket(
+        &self,
+        path: &str,
+    ) -> Result<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        String,
+    > {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let mut request = format!("ws://{}{path}", crate::config::controller_addr())
+            .into_client_request()
+            .map_err(|err| err.to_string())?;
+        if let Some(secret) = self.bearer() {
+            request.headers_mut().insert(
+                "Authorization",
+                format!("Bearer {secret}")
+                    .parse()
+                    .map_err(|err| format!("authorization header: {err}"))?,
+            );
+        }
+        let (socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .map_err(|err| err.to_string())?;
+        Ok(socket)
+    }
+
     pub fn bearer(&self) -> Option<&str> {
         if self.secret.is_empty() {
             None

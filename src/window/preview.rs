@@ -130,6 +130,8 @@ fn state() -> LiveState {
     })
     .collect();
     LiveState {
+        // Demo traffic numbers are fed in directly; there is no core stream to lose.
+        traffic_live: true,
         groups,
         rules,
         logs,
@@ -163,6 +165,12 @@ pub fn run() -> Result<(), String> {
         .renderer_name(renderer_name())
         .select()
         .map_err(|e| e.to_string())?;
+    if let Some(i) = std::env::args().position(|a| a == "--disclaimer-capture") {
+        let out = std::env::args()
+            .nth(i + 1)
+            .ok_or("--disclaimer-capture needs a directory")?;
+        return super::disclaimer::capture(std::path::Path::new(&out));
+    }
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let live = Arc::new(Mutex::new(state()));
     init(tx, live.clone(), "预览配置".into());

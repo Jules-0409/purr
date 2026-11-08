@@ -149,10 +149,10 @@ struct PurrTopBarView: View {
     /// Single compact cell with Upload on top (↑) and Download on bottom (↓)
     private var stackedSpeedCell: some View {
         VStack(alignment: .trailing, spacing: 0) {
-            Text(String(format: "↑ %4.1f MB/s", store.upSpeed))
+            Text("↑ " + store.rateText(store.upSpeed))
                 .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                 .foregroundColor(theme.mute)
-            Text(String(format: "↓ %4.1f MB/s", store.dnSpeed))
+            Text("↓ " + store.rateText(store.dnSpeed))
                 .font(.system(size: 9.5, weight: .bold, design: .monospaced))
                 .foregroundColor(theme.ink)
         }

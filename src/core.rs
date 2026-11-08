@@ -71,6 +71,18 @@ async fn supervise(
     let job = windows_job::Job::new()
         .map_err(|e| eprintln!("purr: core job setup: {e}"))
         .ok();
+    #[cfg(unix)]
+    {
+        let dir = config_dir.clone();
+        let core = binary.clone();
+        if let Ok(stopped) =
+            tokio::task::spawn_blocking(move || stop_stale_cores(&core, &dir)).await
+        {
+            if !stopped.is_empty() {
+                eprintln!("purr: stopped leftover mihomo {stopped:?}");
+            }
+        }
+    }
     loop {
         if *shutdown.borrow() {
             break;
@@ -115,6 +127,60 @@ async fn supervise(
             }
         }
     }
+}
+
+/// A core whose Purr died without shutting it down (killed, crashed, or replaced by an update while
+/// running) keeps the controller, mixed port and TUN. The next core then fails to bind, keeps
+/// running without a controller, and the UI reads statistics from an instance nobody manages.
+/// Only orphans (parent pid 1) that run our core binary on our config directory are stopped.
+/// The setuid TUN copy keeps the user's real uid, so a plain SIGTERM is permitted.
+#[cfg(unix)]
+pub fn stop_stale_cores(binary: &std::path::Path, config_dir: &std::path::Path) -> Vec<u32> {
+    let Ok(out) = std::process::Command::new("/bin/ps")
+        .args(["-axo", "pid=,ppid=,command="])
+        .output()
+    else {
+        return Vec::new();
+    };
+    let pids = stale_core_pids(&String::from_utf8_lossy(&out.stdout), binary, config_dir);
+    for pid in &pids {
+        request_stop(*pid);
+    }
+    let alive = |pid: u32| unsafe { libc::kill(pid as i32, 0) } == 0;
+    for _ in 0..30 {
+        if !pids.iter().any(|p| alive(*p)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    for pid in &pids {
+        if alive(*pid) {
+            unsafe {
+                libc::kill(*pid as i32, libc::SIGKILL);
+            }
+        }
+    }
+    pids
+}
+
+#[cfg(unix)]
+fn stale_core_pids(ps: &str, binary: &std::path::Path, config_dir: &std::path::Path) -> Vec<u32> {
+    let name = binary.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let args = format!(" -d {} -f ", config_dir.display());
+    ps.lines()
+        .filter_map(|line| {
+            let line = line.trim_start();
+            let (pid, rest) = line.split_once(char::is_whitespace)?;
+            let (ppid, command) = rest.trim_start().split_once(char::is_whitespace)?;
+            let (exe, _) = command.split_once(&args)?;
+            let ours = !name.is_empty()
+                && std::path::Path::new(exe)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    == Some(name);
+            (ours && ppid == "1").then(|| pid.parse().ok()).flatten()
+        })
+        .collect()
 }
 
 async fn spawn_core(binary: &PathBuf, config_dir: &PathBuf) -> Result<Child, String> {
@@ -283,5 +349,24 @@ async fn wait_or_shutdown(shutdown: &mut watch::Receiver<bool>, delay: Duration)
     tokio::select! {
         _ = tokio::time::sleep(delay) => *shutdown.borrow(),
         result = shutdown.changed() => result.is_err() || *shutdown.borrow(),
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    #[test]
+    fn only_orphaned_cores_on_our_config_are_stale() {
+        let dir = std::path::Path::new("/Users/u/Library/Application Support/Purr");
+        let bin =
+            std::path::Path::new("/Applications/Purr.app/Contents/Resources/mihomo-darwin-arm64");
+        let ps = "\
+ 8251     1 /Users/u/Library/Application Support/Purr/core/mihomo-darwin-arm64 -d /Users/u/Library/Application Support/Purr -f /Users/u/Library/Application Support/Purr/config.yaml
+10596 10546 /Users/u/Library/Application Support/Purr/core/mihomo-darwin-arm64 -d /Users/u/Library/Application Support/Purr -f /Users/u/Library/Application Support/Purr/config.yaml
+  700     1 /opt/other/mihomo-darwin-arm64 -d /tmp/elsewhere -f /tmp/elsewhere/config.yaml
+  701     1 /usr/bin/python3 -d /Users/u/Library/Application Support/Purr -f x
+  702     1 /Applications/FlClash.app/Contents/MacOS/FlClashCore
+";
+        assert_eq!(stale_core_pids(ps, bin, dir), vec![8251]);
     }
 }

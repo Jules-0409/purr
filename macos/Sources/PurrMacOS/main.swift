@@ -197,8 +197,8 @@ struct PurrTrayPopoverView: View {
 
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(String(format: "↑ %.1f MB/s", store.upSpeed))
-                    Text(String(format: "↓ %.1f MB/s", store.dnSpeed))
+                    Text("↑ " + store.rateText(store.upSpeed))
+                    Text("↓ " + store.rateText(store.dnSpeed))
                         .fontWeight(.bold)
                         .foregroundColor(theme.ink)
                 }
@@ -281,6 +281,21 @@ struct PurrTrayPopoverView: View {
     }
 }
 
+struct PurrDisclaimerHost: View {
+    let store: PurrStore
+    let onAccepted: () -> Void
+    let onQuit: () -> Void
+    @State private var input = ""
+    @State private var failed = false
+
+    var body: some View {
+        PurrDisclaimerView(input: $input, failed: failed, onAccept: {
+            guard PurrDisclaimer.matches(input) else { return }
+            if store.acceptDisclaimer(input) { onAccepted() } else { failed = true }
+        }, onQuit: onQuit)
+    }
+}
+
 // MARK: - AppDelegate (Custom Cat-Ear StatusBar Logo + Low-Memory Window Suspension)
 final class PurrAppDelegate: NSObject, NSApplicationDelegate {
     let store = PurrStore()
@@ -296,6 +311,7 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         NSApp.setActivationPolicy(.regular)
+        installTerminationSignals()
         if let icnsPath = Bundle.main.path(forResource: "AppIcon", ofType: "icns"),
            let iconImg = NSImage(contentsOfFile: icnsPath) {
             NSApp.applicationIconImage = iconImg
@@ -303,6 +319,64 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
             NSApp.applicationIconImage = fallbackImg
         }
 
+        if store.disclaimerPending {
+            showDisclaimer()
+            return
+        }
+        launchMainUI()
+    }
+
+    private var disclaimerWindow: NSWindow?
+    private var signalSources: [DispatchSourceSignal] = []
+
+    /// `kill` / `killall Purr` (and app updaters) send SIGTERM; route it through NSApp.terminate so
+    /// applicationWillTerminate stops the core instead of leaving it orphaned with the ports.
+    private func installTerminationSignals() {
+        for sig in [SIGTERM, SIGINT, SIGHUP] {
+            signal(sig, SIG_IGN)
+            let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            src.setEventHandler { NSApp.terminate(nil) }
+            src.resume()
+            signalSources.append(src)
+        }
+    }
+
+    private func showDisclaimer() {
+        let size = PurrDisclaimer.size
+        let win = PurrKeyWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        win.isOpaque = false
+        win.backgroundColor = .clear
+        win.hasShadow = true
+        win.isMovableByWindowBackground = true
+        win.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: PurrDisclaimerHost(store: store,
+            onAccepted: { [weak self] in self?.disclaimerAccepted() },
+            onQuit: { NSApp.terminate(nil) }))
+        host.wantsLayer = true
+        host.layer?.cornerRadius = 12
+        host.layer?.cornerCurve = .continuous
+        host.layer?.masksToBounds = true
+        win.contentView = host
+        win.center()
+        disclaimerWindow = win
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func disclaimerAccepted() {
+        disclaimerWindow?.orderOut(nil)
+        disclaimerWindow?.contentView = nil
+        disclaimerWindow = nil
+        launchMainUI()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func launchMainUI() {
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 760),
             styleMask: [.borderless, .fullSizeContentView, .miniaturizable],
@@ -375,7 +449,7 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if PurrSnapshot.active { return }
+        if PurrSnapshot.active || store.disclaimerPending { return }
         purr_core_shutdown()
     }
 
@@ -445,7 +519,7 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
 
     /// Renders the 22x22 cat-ear logo + optional single-column 2-line stacked speed (↑ on top, ↓ on bottom)
     private func makeCatEarStatusImage(isAwake: Bool, hasError: Bool, upSpeed: Double, dnSpeed: Double) -> NSImage {
-        let showSpeed = isAwake && !hasError
+        let showSpeed = isAwake && !hasError && store.statsReady
         let totalWidth: CGFloat = showSpeed ? 70 : 22
         let img = NSImage(size: NSSize(width: totalWidth, height: 22), flipped: true) { _ in
             NSColor.black.withAlphaComponent(isAwake ? 1.0 : 0.55).setStroke()
@@ -507,8 +581,8 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
                     .font: NSFont.monospacedSystemFont(ofSize: 8.5, weight: .bold),
                     .foregroundColor: NSColor.black
                 ]
-                let upStr = String(format: "↑%4.1fM", upSpeed) as NSString
-                let dnStr = String(format: "↓%4.1fM", dnSpeed) as NSString
+                let upStr = ("↑" + PurrRate.compact(upSpeed)) as NSString
+                let dnStr = ("↓" + PurrRate.compact(dnSpeed)) as NSString
                 upStr.draw(at: NSPoint(x: 24.0, y: 1.0), withAttributes: upAttrs)
                 dnStr.draw(at: NSPoint(x: 24.0, y: 10.8), withAttributes: dnAttrs)
             }
@@ -520,7 +594,7 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusItemAppearance() {
         guard let btn = statusItem?.button else { return }
-        let awake = store.isAwake && !store.firstRun
+        let awake = store.isAwake && !store.firstRun && !store.disclaimerPending
         btn.title = ""
         btn.imagePosition = .imageOnly
         btn.image = makeCatEarStatusImage(

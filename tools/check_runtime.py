@@ -102,6 +102,8 @@ def main():
         config+="  - MATCH,DIRECT\n"
         (directory/"config.yaml").write_text(config)
         (directory/"purr-validation-fixture").touch()
+        # Fixture runs are pre-accepted so the first-launch notice does not block the harness.
+        (directory / "disclaimer.json").write_text(__import__("json").dumps({"disclaimer_accepted": True, "version": 1, "accepted_at": int(__import__("time").time())}))
         (directory/"preferences.json").write_text(json.dumps({"mixed_port":proxy,"auto_wake":False,"system_proxy":False}))
         env=dict(os.environ,PURR_CONFIG_DIR=str(directory),PURR_CONTROLLER_ADDR=f"127.0.0.1:{controller}")
         log=(directory/"run.log").open("w")

@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::api::Api;
@@ -29,8 +28,12 @@ pub async fn traffic_loop(api: Api, live: Arc<Mutex<LiveState>>) {
                         .unwrap_or(0);
                     window::set_speed(&live, up, down);
                 }
+                window::set_traffic_live(&live, false);
             }
-            Err(err) => eprintln!("purr: traffic stream failed: {err}"),
+            Err(err) => {
+                window::set_traffic_live(&live, false);
+                eprintln!("purr: traffic stream failed: {err}")
+            }
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
@@ -56,6 +59,9 @@ pub async fn log_loop(api: Api, live: Arc<Mutex<LiveState>>) {
                         .get("payload")
                         .and_then(|item| item.as_str())
                         .unwrap_or(text.as_str());
+                    if crate::present::is_reject_log(payload) {
+                        window::count_reject(&live);
+                    }
                     window::push_log(&live, kind, payload);
                 }
             }
@@ -72,21 +78,7 @@ async fn connect(
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     String,
 > {
-    let mut request = format!("ws://{}{path}", crate::config::controller_addr())
-        .into_client_request()
-        .map_err(|err| err.to_string())?;
-    if let Some(secret) = api.bearer() {
-        request.headers_mut().insert(
-            "Authorization",
-            format!("Bearer {secret}")
-                .parse()
-                .map_err(|err| format!("authorization header: {err}"))?,
-        );
-    }
-    let (socket, _) = tokio_tungstenite::connect_async(request)
-        .await
-        .map_err(|err| err.to_string())?;
-    Ok(socket)
+    api.websocket(path).await
 }
 
 fn message_text(message: Message) -> Option<String> {

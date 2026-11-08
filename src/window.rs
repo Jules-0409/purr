@@ -16,6 +16,7 @@ use crate::present::{self, Conn, ProxyGroup, Rule};
 use crate::tray::MenuCommand;
 
 mod design;
+pub mod disclaimer;
 mod fixture;
 mod popover;
 mod preview;
@@ -32,6 +33,7 @@ pub fn renderer_name() -> String {
 slint::slint! {
     export { MainWindow, Theme, IconClock, TrayWindow, TrayNode, S, Anim, AsciiRow, SiteRow } from "ui/app.slint";
     export { SwitchCheckWindow } from "ui/switch-check.slint";
+    export { DisclaimerWindow } from "ui/disclaimer.slint";
 }
 
 thread_local! {
@@ -90,6 +92,8 @@ pub struct LiveState {
     pub awake: bool,
     pub up_bps: u64,
     pub down_bps: u64,
+    /// True while the core's /traffic stream is delivering; speeds show "—" otherwise.
+    pub traffic_live: bool,
     pub flow: f32,
     pub history: Vec<(u64, u64)>,
     pub last_sample: Option<Instant>,
@@ -133,6 +137,7 @@ impl Default for LiveState {
             awake: false,
             up_bps: 0,
             down_bps: 0,
+            traffic_live: false,
             flow: 0.0,
             history: Vec::new(),
             last_sample: None,
@@ -1329,8 +1334,16 @@ fn apply(ui: &MainWindow, state: &LiveState) {
         ui.global::<S>().set_tun_auth(tun_auth);
     }
     ui.set_awake(state.awake);
-    let (down_value, down_unit) = present::rate_parts(state.down_bps);
-    let (up_value, up_unit) = present::rate_parts(state.up_bps);
+    let (down_value, down_unit) = if state.traffic_live {
+        present::rate_parts(state.down_bps)
+    } else {
+        ("—".into(), String::new())
+    };
+    let (up_value, up_unit) = if state.traffic_live {
+        present::rate_parts(state.up_bps)
+    } else {
+        ("—".into(), String::new())
+    };
     ui.set_down_value(down_value.into());
     ui.set_down_unit(down_unit.into());
     ui.set_up_value(up_value.into());
@@ -2289,8 +2302,29 @@ pub fn push_log(live: &Mutex<LiveState>, kind: &str, message: &str) {
     guard.bump();
 }
 
+/// Counts one rule-rejected connection from the core log (this run and today's telemetry).
+pub fn count_reject(live: &Mutex<LiveState>) {
+    let mut guard = live.lock().expect("live lock");
+    guard.blocked_connections = guard.blocked_connections.saturating_add(1);
+    guard.telemetry.reject(crate::subscriptions::now());
+    guard.bump();
+}
+
+pub fn set_traffic_live(live: &Mutex<LiveState>, on: bool) {
+    let mut guard = live.lock().expect("live lock");
+    if guard.traffic_live != on {
+        guard.traffic_live = on;
+        if !on {
+            guard.up_bps = 0;
+            guard.down_bps = 0;
+        }
+        guard.bump();
+    }
+}
+
 pub fn set_speed(live: &Mutex<LiveState>, up: u64, down: u64) {
     let mut guard = live.lock().expect("live lock");
+    guard.traffic_live = true;
     guard.up_bps = up;
     guard.down_bps = down;
     let now = Instant::now();
@@ -2438,12 +2472,10 @@ pub fn set_connections(live: &Mutex<LiveState>, value: &serde_json::Value) {
         .telemetry
         .connections(value, crate::subscriptions::now());
     let mut route_down = [0u64; 2];
-    let mut blocked = 0;
     if let Some(conns) = value["connections"].as_array() {
         for conn in conns {
             let policy = conn["chains"][0].as_str().unwrap_or("");
             if policy.starts_with("REJECT") {
-                blocked += 1;
                 continue;
             }
             let kind = usize::from(policy == "DIRECT");
@@ -2456,7 +2488,6 @@ pub fn set_connections(live: &Mutex<LiveState>, value: &serde_json::Value) {
         }
     }
     guard.route_down = route_down;
-    guard.blocked_connections = blocked;
     if guard.connections == connections
         && guard.session_down == totals.down
         && guard.session_up == totals.up

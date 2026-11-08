@@ -1,0 +1,71 @@
+// First-launch notice, shown before the core, the system proxy or TUN are touched.
+import { Theme } from "tokens.slint";
+import { T } from "design/theme.slint";
+import { Bk } from "design/widgets.slint";
+
+export component DisclaimerWindow inherits Window {
+    title: "PURR";
+    icon: @image-url("icons/app-icon.png");
+    width: 560px;
+    height: 320px;
+    background: Theme.target-warm;
+    default-font-family: Theme.sans;
+    in-out property <string> input;
+    // Rust checks the phrase (settings::disclaimer_input_matches) and sets this on every edit.
+    in-out property <bool> phrase-ok: false;
+    in-out property <bool> save-failed: false;
+    callback edited(string);
+    callback accept();
+    callback quit();
+    init => { Theme.awake = true; Theme.mode = "rule"; field.focus(); }
+
+    VerticalLayout {
+        padding-left: 36px; padding-right: 36px; padding-top: 30px; padding-bottom: 24px;
+        spacing: 0px;
+        Text { text: "PURR · 免责声明"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * 0.16; color: T.mute; }
+        Rectangle { height: 10px; }
+        Text { text: "使用前请阅读"; font-size: 24px; font-weight: 900; color: T.ink; }
+        Rectangle { height: 14px; }
+        Text {
+            text: "Purr 只是一个网络代理客户端工具，不提供任何节点、订阅或网络服务。请遵守你所在地的法律法规，合法使用。因使用本软件产生的一切后果与风险，由使用者自行承担。";
+            font-size: 13.5px; color: T.ink; wrap: word-wrap;
+        }
+        Rectangle { height: 16px; }
+        Text { text: "请在下方输入「我已阅读并同意」后继续。"; font-size: 12.5px; color: T.mute; wrap: word-wrap; }
+        Rectangle { height: 10px; }
+        Rectangle {
+            height: 32px;
+            field := TextInput {
+                x: 0; y: 0; width: parent.width - 22px; height: parent.height - 1.5px;
+                text <=> root.input;
+                font-family: T.mono; font-size: 13px; color: T.ink;
+                single-line: true; vertical-alignment: center;
+                selection-background-color: T.ink; selection-foreground-color: T.bg;
+                edited => { root.edited(self.text); }
+                accepted => { if root.phrase-ok { root.accept(); } }
+            }
+            if root.input == "": Text {
+                x: 0; y: 0; width: parent.width; height: parent.height - 1.5px;
+                text: "在此输入"; font-family: T.mono; font-size: 13px; color: T.mute; vertical-alignment: center;
+            }
+            if root.phrase-ok: Text {
+                x: parent.width - 14px; y: 0; width: 14px; height: parent.height - 1.5px;
+                text: "✓"; font-family: T.mono; font-size: 13px; font-weight: 700; color: T.ink; vertical-alignment: center;
+            }
+            Rectangle { x: 0; y: parent.height - 1.5px; width: parent.width; height: 1.5px; background: T.ink; }
+        }
+        if root.save-failed: Text { text: "保存失败，请重试"; font-family: T.mono; font-size: 11px; color: T.ink; }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 14px;
+            Bk { text: "退出"; font-size: 13px; clicked => { root.quit(); } }
+            Bk {
+                text: "同意"; font-size: 13px;
+                enabled: root.phrase-ok;
+                opacity: root.phrase-ok ? 1 : 0.35;
+                clicked => { root.accept(); }
+            }
+        }
+    }
+}

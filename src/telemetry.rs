@@ -94,9 +94,6 @@ impl Telemetry {
                         c["rulePayload"].as_str().unwrap_or("")
                     );
                     *self.hits.entry(key).or_default() += 1;
-                    if policy.starts_with("REJECT") {
-                        self.blocked += 1;
-                    }
                 }
                 if !policy.starts_with("REJECT") {
                     let k = usize::from(policy == "DIRECT");
@@ -107,6 +104,11 @@ impl Telemetry {
             }
         }
         self.previous_connections = seen;
+    }
+    /// One rule-rejected connection, seen in the core's info log (see `present::is_reject_log`).
+    pub fn reject(&mut self, now: u64) {
+        self.roll(now);
+        self.blocked = self.blocked.saturating_add(1);
     }
     pub fn load(dir: &std::path::Path) -> Self {
         let mut data = std::fs::read(dir.join("statistics.json"))
@@ -142,7 +144,10 @@ mod tests {
         s.probe("node", true, 1893456002);
         s.probe("node", false, 1893456003);
         assert_eq!(s.uptime("node"), Some(50.));
+        s.reject(1893456003);
+        assert_eq!(s.blocked, 1);
         s.roll(1893542700);
+        assert_eq!(s.blocked, 0);
         assert_eq!(s.down, 0);
         assert_eq!(s.uptime("node"), None);
     }

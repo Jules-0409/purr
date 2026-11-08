@@ -128,6 +128,44 @@ impl Preferences {
         text
     }
 }
+/// Version of the first-launch notice; bump it to ask everyone to read a changed text again.
+pub const DISCLAIMER_VERSION: u32 = 1;
+/// What the user has to type before the client starts anything.
+pub const DISCLAIMER_PHRASE: &str = "我已阅读并同意";
+const DISCLAIMER_FILE: &str = "disclaimer.json";
+
+/// Stored next to preferences.json in the app config directory. Kept in its own file so
+/// preference writes (which serialize in-memory copies) can never drop the acceptance.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct DisclaimerAcceptance {
+    pub disclaimer_accepted: bool,
+    pub version: u32,
+    /// Unix seconds.
+    pub accepted_at: u64,
+}
+
+pub fn disclaimer_input_matches(input: &str) -> bool {
+    input.trim() == DISCLAIMER_PHRASE
+}
+
+pub fn disclaimer_accepted(dir: &Path) -> bool {
+    fs::read(dir.join(DISCLAIMER_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<DisclaimerAcceptance>(&bytes).ok())
+        .is_some_and(|a| a.disclaimer_accepted && a.version >= DISCLAIMER_VERSION)
+}
+
+pub fn accept_disclaimer(dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let record = DisclaimerAcceptance {
+        disclaimer_accepted: true,
+        version: DISCLAIMER_VERSION,
+        accepted_at: crate::subscriptions::now(),
+    };
+    let bytes = serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?;
+    atomic_write(&dir.join(DISCLAIMER_FILE), &bytes)
+}
+
 /// Replace only a complete top-level scalar, preserving unrelated profile content.
 pub fn set_yaml_key(text: &str, key: &str, value: &str) -> String {
     let mut found = false;
@@ -245,6 +283,44 @@ mod tests {
         assert!(changed.contains("  mixed-port: 8\n"));
         assert!(changed.contains("proxies: []\n"));
         assert_eq!(set_yaml_key(&changed, "mixed-port", "9090"), changed);
+    }
+    #[test]
+    fn disclaimer_phrase_and_flag() {
+        assert!(disclaimer_input_matches("我已阅读并同意"));
+        assert!(disclaimer_input_matches("  我已阅读并同意\n"));
+        assert!(disclaimer_input_matches("\u{3000}我已阅读并同意\u{3000}"));
+        for wrong in [
+            "",
+            "我已阅读",
+            "我已阅读 并同意",
+            "我已阅读并同意。",
+            "同意",
+        ] {
+            assert!(!disclaimer_input_matches(wrong), "{wrong:?}");
+        }
+        let dir = std::env::temp_dir().join(format!("purr-disclaimer-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        assert!(!disclaimer_accepted(&dir));
+        accept_disclaimer(&dir).unwrap();
+        assert!(disclaimer_accepted(&dir));
+        let saved: DisclaimerAcceptance =
+            serde_json::from_slice(&fs::read(dir.join(DISCLAIMER_FILE)).unwrap()).unwrap();
+        assert!(saved.disclaimer_accepted);
+        assert_eq!(saved.version, DISCLAIMER_VERSION);
+        assert!(saved.accepted_at > 0);
+        // A preference write must not touch the acceptance.
+        Preferences::default().save(&dir).unwrap();
+        assert!(disclaimer_accepted(&dir));
+        // Older or broken records ask again.
+        fs::write(
+            dir.join(DISCLAIMER_FILE),
+            br#"{"disclaimer_accepted":true,"version":0,"accepted_at":1}"#,
+        )
+        .unwrap();
+        assert!(!disclaimer_accepted(&dir));
+        fs::write(dir.join(DISCLAIMER_FILE), b"not json").unwrap();
+        assert!(!disclaimer_accepted(&dir));
+        fs::remove_dir_all(&dir).unwrap();
     }
     #[test]
     fn preferences_round_trip() {

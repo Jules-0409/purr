@@ -87,6 +87,7 @@ enum PurrSnapshot {
         s.totalDirectMB = 1190
         s.blockedMice = 1284
         s.memMB = 22
+        s.statsReady = true
     }
 
     static func setState(_ s: PurrStore, _ state: String, page: Int, pane: String = "live") {
@@ -287,6 +288,16 @@ enum PurrSnapshot {
         queue.append(("tray-awake", { setState(store, "ok", page: 0) }, false, true))
         queue.append(("tray-sleep", { setState(store, "sleep", page: 0) }, false, true))
         queue.append(("tray-first", { setState(store, "first", page: 0) }, false, true))
+        if let only = ProcessInfo.processInfo.environment["PURR_SNAPSHOT_ONLY"], !only.isEmpty {
+            queue = queue.filter { $0.0.hasPrefix(only) }
+        }
+        let only = ProcessInfo.processInfo.environment["PURR_SNAPSHOT_ONLY"] ?? ""
+        if only.isEmpty || "disclaimer".hasPrefix(only) || only.hasPrefix("disclaimer") {
+            for (name, text) in [("disclaimer-empty", ""), ("disclaimer-typed", PurrDisclaimer.phrase)] {
+                render(PurrDisclaimerView(input: .constant(text), onAccept: {}, onQuit: {}),
+                       size: PurrDisclaimer.size, to: "\(dir)/mac-\(name).png", dark: false)
+            }
+        }
         func step(_ i: Int) {
             if i >= queue.count { print("snapshot: done"); exit(0) }
             let (name, apply, dark, tray) = queue[i]

@@ -286,8 +286,8 @@ struct OverviewPageView: View {
         let pxCount = store.conns.filter { $0.pol != "DIRECT" }.count
         return VStack(spacing: 0) {
             HStack(spacing: 20) {
-                statCell(label: "DOWN · 下行网速 ↓", value: String(format: "%.1f", store.dnSpeed), unit: "MB/s", sub: String(format: "60 秒峰值 %.1f MB/s", store.peakDn), showBottomBorder: true)
-                statCell(label: "UP · 上行网速 ↑", value: String(format: "%.1f", store.upSpeed), unit: "MB/s", sub: String(format: "60 秒峰值 %.1f MB/s", store.peakUp), showBottomBorder: true)
+                statCell(label: "DOWN · 下行网速 ↓", value: store.rateParts(store.dnSpeed).0, unit: store.rateParts(store.dnSpeed).1, sub: "60 秒峰值 " + store.rateText(store.peakDn), showBottomBorder: true)
+                statCell(label: "UP · 上行网速 ↑", value: store.rateParts(store.upSpeed).0, unit: store.rateParts(store.upSpeed).1, sub: "60 秒峰值 " + store.rateText(store.peakUp), showBottomBorder: true)
             }
             .frame(maxHeight: .infinity)
 
@@ -412,7 +412,7 @@ struct OverviewPageView: View {
                 .foregroundColor(theme.mute)
                 .padding(.trailing, 16)
 
-                Text(String(format: "PEAK %.1f MB/S", store.peakDn))
+                Text("PEAK " + store.rateText(store.peakDn).uppercased())
                     .font(.system(size: 11, design: .monospaced))
                     .tracking(1.6)
                     .foregroundColor(theme.mute)
