@@ -932,12 +932,15 @@ final class PurrStore: ObservableObject {
             toastVisible = true
         }
         toastTask?.cancel()
-        toastTask = Task {
+        // PurrStore is not main-actor isolated, so a plain `Task {}` here ran on the cooperative
+        // pool and flipped @Published state off the main thread. SwiftUI then waits for main while
+        // holding the store's publisher lock, and the next main-thread @Published write deadlocks
+        // the app (seen in the r12 status-bar stress run). Hide the toast on the main actor.
+        toastTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_600_000_000)
-            if !Task.isCancelled {
-                withAnimation(.easeIn(duration: 0.22)) {
-                    toastVisible = false
-                }
+            guard let self = self, !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.22)) {
+                self.toastVisible = false
             }
         }
     }

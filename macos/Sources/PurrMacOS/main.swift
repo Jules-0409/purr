@@ -560,100 +560,30 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
     }
 
-    /// Renders the 22x22 cat-ear logo + optional single-column 2-line stacked speed (↑ on top, ↓ on bottom)
-    private func makeCatEarStatusImage(isAwake: Bool, hasError: Bool, upSpeed: Double, dnSpeed: Double) -> NSImage {
-        let showSpeed = isAwake && !hasError && store.statsReady
-        let totalWidth: CGFloat = showSpeed ? 70 : 22
-        let img = NSImage(size: NSSize(width: totalWidth, height: 22), flipped: true) { _ in
-            NSColor.black.withAlphaComponent(isAwake ? 1.0 : 0.55).setStroke()
-
-            // Cat ears outline with smooth rounded crown between ears
-            let ears = NSBezierPath()
-            ears.lineWidth = 1.9
-            ears.lineCapStyle = .round
-            ears.lineJoinStyle = .round
-            ears.move(to: NSPoint(x: 1.5, y: 15.5))
-            ears.line(to: NSPoint(x: 4.73, y: 6.76))
-            ears.line(to: NSPoint(x: 8.15, y: 11.89))
-            ears.curve(
-                to: NSPoint(x: 13.85, y: 11.89),
-                controlPoint1: NSPoint(x: 9.8, y: 10.9),
-                controlPoint2: NSPoint(x: 12.2, y: 10.9)
-            )
-            ears.line(to: NSPoint(x: 17.27, y: 6.76))
-            ears.line(to: NSPoint(x: 20.50, y: 15.50))
-            ears.stroke()
-
-            // Connected wave line underneath: M3 19.6 q2-1.4 4 0 t4 0 4 0 4 0
-            if isAwake {
-                let wave = NSBezierPath()
-                wave.lineWidth = 1.8
-                wave.lineCapStyle = .round
-                wave.lineJoinStyle = .round
-                wave.move(to: NSPoint(x: 3.0, y: 19.2))
-                let pts: [(CGFloat, CGFloat, CGFloat, CGFloat)] = [
-                    (5.0, 17.8, 7.0, 19.2),
-                    (9.0, 20.6, 11.0, 19.2),
-                    (13.0, 17.8, 15.0, 19.2),
-                    (17.0, 20.6, 19.0, 19.2)
-                ]
-                for seg in pts {
-                    wave.curve(
-                        to: NSPoint(x: seg.2, y: seg.3),
-                        controlPoint1: NSPoint(x: seg.0, y: seg.1),
-                        controlPoint2: NSPoint(x: seg.0, y: seg.1)
-                    )
-                }
-                wave.stroke()
-            }
-
-            // Error dot: <circle class="bd" cx="19.6" cy="4.2" r="2.6"/>
-            if hasError {
-                NSColor.black.setFill()
-                let dot = NSBezierPath(ovalIn: NSRect(x: 19.6 - 2.4, y: 4.2 - 2.4, width: 4.8, height: 4.8))
-                dot.fill()
-            }
-
-            // Single-column 2-line stacked speed (Up ↑ on top, Down ↓ on bottom)
-            if showSpeed {
-                let upAttrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.monospacedSystemFont(ofSize: 8.5, weight: .medium),
-                    .foregroundColor: NSColor.black.withAlphaComponent(0.82)
-                ]
-                let dnAttrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.monospacedSystemFont(ofSize: 8.5, weight: .bold),
-                    .foregroundColor: NSColor.black
-                ]
-                let upStr = ("↑" + PurrRate.compact(upSpeed)) as NSString
-                let dnStr = ("↓" + PurrRate.compact(dnSpeed)) as NSString
-                upStr.draw(at: NSPoint(x: 24.0, y: 1.0), withAttributes: upAttrs)
-                dnStr.draw(at: NSPoint(x: 24.0, y: 10.8), withAttributes: dnAttrs)
-            }
-            return true
-        }
-        img.isTemplate = true
-        return img
-    }
-
     /// What the menu-bar image last showed; the image is only rebuilt when this changes.
+    /// Light/dark menu bars and Retina vs standard screens need no key: the image is a template
+    /// (AppKit tints it) and carries both 1x and 2x bitmaps.
     private var statusImageKey: String = ""
 
     private func updateStatusItemAppearance() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.updateStatusItemAppearance() }
+            return
+        }
         guard let btn = statusItem?.button else { return }
         let awake = store.isAwake && !store.firstRun && !store.disclaimerPending
-        let showSpeed = awake && store.errKind == nil && store.statsReady
-        let key = "\(awake)|\(store.errKind != nil)|\(showSpeed)|"
-            + (showSpeed ? PurrRate.compact(store.upSpeed) + "|" + PurrRate.compact(store.dnSpeed) : "")
+        let hasError = store.errKind != nil
+        let showSpeed = awake && !hasError && store.statsReady
+        let speed: (up: String, dn: String)? = showSpeed
+            ? ("↑" + PurrRate.compact(store.upSpeed), "↓" + PurrRate.compact(store.dnSpeed))
+            : nil
+        let key = "\(awake)|\(hasError)|" + (speed.map { $0.up + "|" + $0.dn } ?? "-")
         if key == statusImageKey, btn.image != nil { return }
         statusImageKey = key
-        btn.title = ""
-        btn.imagePosition = .imageOnly
-        btn.image = makeCatEarStatusImage(
-            isAwake: awake,
-            hasError: store.errKind != nil,
-            upSpeed: store.upSpeed,
-            dnSpeed: store.dnSpeed
-        )
+        if !btn.title.isEmpty { btn.title = "" }
+        if btn.imagePosition != .imageOnly { btn.imagePosition = .imageOnly }
+        // Drawn now, into bitmaps; AppKit's status-bar redraws only blit pixels (see PurrStatusImage).
+        btn.image = PurrStatusImage.make(isAwake: awake, hasError: hasError, speed: speed)
     }
 
     @objc private func togglePopover(_ sender: AnyObject?) {
