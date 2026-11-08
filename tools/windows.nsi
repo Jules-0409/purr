@@ -6,12 +6,12 @@ RequestExecutionLevel user
 SetCompressor /SOLID lzma
 !include "MUI2.nsh"
 !define MUI_ABORTWARNING
-!define MUI_ICON "${APPDIR}/../purr.ico"
-!define MUI_UNICON "${APPDIR}/../purr.ico"
+!define MUI_ICON "${APPDIR}\..\purr.ico"
+!define MUI_UNICON "${APPDIR}\..\purr.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\Purr.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "立即启动 PURR (Launch PURR)"
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "${APPDIR}/LICENSE"
+!insertmacro MUI_PAGE_LICENSE "${APPDIR}\LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -37,8 +37,8 @@ Section "PURR" SEC01
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Internet Settings" "ProxyEnable" 0
   Sleep 200
   SetOutPath "$INSTDIR"
-  File /r "${APPDIR}/*"
-  File "${APPDIR}/../purr.ico"
+  File /r "${APPDIR}\*"
+  File "${APPDIR}\..\purr.ico"
   CreateShortcut "$SMPROGRAMS\Purr.lnk" "$INSTDIR\Purr.exe" "" "$INSTDIR\purr.ico" 0
   CreateShortcut "$DESKTOP\Purr.lnk" "$INSTDIR\Purr.exe" "" "$INSTDIR\purr.ico" 0
   WriteUninstaller "$INSTDIR\Uninstall.exe"
