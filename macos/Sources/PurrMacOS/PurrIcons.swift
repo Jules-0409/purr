@@ -816,13 +816,13 @@ struct PurrIconView: View {
         let wantsFrames = activeHover || (PurrClock.now() - hoverStartedAt < 0.65) || animateUntil > Date()
         Group {
             if wantsFrames && !PurrSnapshot.active {
-                // Hover wiggle: the icon redraws itself (30 fps) in its own small layer while the pointer
+                // Hover wiggle: the icon redraws itself (60 fps) in its own small layer while the pointer
                 // is on it and for the 0.65 s settle-out. Through SwiftUI every one of those frames
                 // re-laid-out the whole window (~15-20 % CPU for a pointer resting on an icon).
                 let icon = self
                 PurrDrivenCanvas(
                     size: CGSize(width: size, height: size),
-                    interval: { icon.activeHover || PurrClock.now() - icon.hoverStartedAt < 0.65 ? 1.0 / 30.0 : nil },
+                    interval: { icon.activeHover || PurrClock.now() - icon.hoverStartedAt < 0.65 ? 1.0 / 60.0 : nil },
                     draw: { ctx, sz, _ in icon.drawFrame(&ctx, sz, now: PurrClock.now()) }
                 )
             } else {

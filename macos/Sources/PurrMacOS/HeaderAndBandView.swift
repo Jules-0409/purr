@@ -343,7 +343,7 @@ struct PurrEarBandView: View {
                         interval: { [store] in
                             let moving = PurrClock.now() - store.pageChangedAt < 0.6
                             if store.holding || store.floodAnimating || moving { return 1.0 / 30.0 }
-                            return store.isAwake ? 1.0 / 15.0 : nil
+                            return store.isAwake ? 1.0 / 30.0 : nil
                         },
                         strokes: bandStrokes
                     )

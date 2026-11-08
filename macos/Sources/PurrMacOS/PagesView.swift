@@ -772,7 +772,7 @@ struct SleepingZzzView: View {
                 }
             }
         } else {
-            // Slow 5 s bob (max ~10 px/s): 15 fps looks the same as 30.
+            // Slow 5 s bob, drawn at 30 fps.
             let row = PurrGlyphRow(
                 chars: ["z", "z", "z"],
                 fontSizes: [56, 92, 136],
@@ -783,7 +783,7 @@ struct SleepingZzzView: View {
             PurrGlyphCanvas(
                 row: row,
                 margin: m,
-                interval: { 1.0 / 15.0 },
+                interval: { 1.0 / 30.0 },
                 offsets: { i, t in CGFloat(sin(t * 1.25 - 1.6 * Double(i)) * (4.0 + 2.0 * Double(i))) }
             )
             .padding(-m)
@@ -832,7 +832,7 @@ struct PurrHeroText: View {
             PurrGlyphCanvas(
                 row: row,
                 margin: m,
-                interval: { direct ? nil : 1.0 / 15.0 },
+                interval: { direct ? nil : 1.0 / 30.0 },
                 offsets: { i, t in (i > 0 && !direct) ? CGFloat(sin(t * freq + Double(i) * 2.1) * amp) : 0 }
             )
             .padding(-m)
