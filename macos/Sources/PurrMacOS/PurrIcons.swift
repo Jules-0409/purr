@@ -1,5 +1,468 @@
 import SwiftUI
 import AppKit
+import Combine
+
+// MARK: - Self-driven animation
+/// Base for views that animate from their own timer, with no SwiftUI work per frame: a TimelineView
+/// tick, even in a small subtree, re-ran layout of the whole window (~15 % CPU at 15 fps).
+/// `interval` is asked on every frame: a number keeps it running at that cadence, nil stops after
+/// showing the current state. Frames also stop while the main window is not on screen.
+class PurrTickingView: NSView {
+    var interval: (() -> TimeInterval?)?
+    private var timer: Timer?
+    private var currentInterval: TimeInterval = 0
+    private var visibilityObserver: AnyCancellable?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        visibilityObserver = PurrVisibility.shared.$mainWindowVisible.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.kick() }
+        }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    deinit { timer?.invalidate() }
+
+    override var isOpaque: Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        kick()
+    }
+
+    /// Shows the state for time `t` (reference-date seconds).
+    func render(at t: Double) {}
+
+    private func stop() {
+        timer?.invalidate()
+        timer = nil
+        currentInterval = 0
+    }
+
+    /// Re-evaluates whether frames are needed (called on SwiftUI updates and visibility changes).
+    func kick() {
+        render(at: PurrClock.ref(Date()))
+        guard window != nil, PurrVisibility.shared.mainWindowVisible, let iv = interval?() else {
+            stop()
+            return
+        }
+        guard iv != currentInterval || timer == nil else { return }
+        stop()
+        currentInterval = iv
+        // Fire on a global grid so every ticking view with the same cadence updates in the same
+        // display cycle (two unaligned 15 fps views would mean 30 commits per second).
+        let ref = Date().timeIntervalSinceReferenceDate
+        let first = Date(timeIntervalSinceReferenceDate: (ref / iv).rounded(.up) * iv)
+        let t = Timer(fire: first, interval: iv, repeats: true) { [weak self] _ in self?.step() }
+        t.tolerance = iv * 0.1
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    private func step() {
+        render(at: PurrClock.ref(Date()))
+        guard PurrVisibility.shared.mainWindowVisible, let iv = interval?() else {
+            stop()
+            return
+        }
+        if iv != currentInterval { kick() }
+    }
+}
+
+/// Line art redrawn into its own backing store each frame (ear band, hovered icon).
+final class PurrDrivenView: PurrTickingView {
+    var drawBlock: ((inout CGCanvasContext, CGSize, Double) -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        layer?.contentsFormat = .RGBA8Uint
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+
+    // 8-bit backing store: on a wide-colour display AppKit otherwise picks half-float RGBA
+    // (8 bytes per pixel) for flat sRGB line art. AppKit re-picks it when the view joins a window.
+    override func viewDidMoveToWindow() {
+        layer?.contentsFormat = .RGBA8Uint
+        super.viewDidMoveToWindow()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        layer?.contentsFormat = .RGBA8Uint
+    }
+
+    override func render(at t: Double) { needsDisplay = true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let block = drawBlock, let cg = NSGraphicsContext.current?.cgContext else { return }
+        var ctx = CGCanvasContext(cg: cg)
+        block(&ctx, bounds.size, PurrClock.ref(Date()))
+    }
+}
+
+struct PurrDrivenCanvas: NSViewRepresentable {
+    let size: CGSize
+    let interval: () -> TimeInterval?
+    let draw: (inout CGCanvasContext, CGSize, Double) -> Void
+
+    func makeNSView(context: Context) -> PurrDrivenView {
+        let v = PurrDrivenView(frame: CGRect(origin: .zero, size: size))
+        v.drawBlock = draw
+        v.interval = interval
+        return v
+    }
+
+    func updateNSView(_ nsView: PurrDrivenView, context: Context) {
+        nsView.drawBlock = draw
+        nsView.interval = interval
+        nsView.kick()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: PurrDrivenView, context: Context) -> CGSize? {
+        size
+    }
+}
+
+/// One round-capped, round-joined stroke of the ear band.
+struct PurrStroke {
+    let path: CGPath
+    let color: NSColor
+    let width: CGFloat
+    let dash: [CGFloat]
+
+    func stroke(in cg: CGContext) {
+        cg.saveGState()
+        cg.setStrokeColor(color.cgColor)
+        cg.setLineWidth(width)
+        cg.setLineCap(.round)
+        cg.setLineJoin(.round)
+        if !dash.isEmpty { cg.setLineDash(phase: 0, lengths: dash) }
+        cg.addPath(path)
+        cg.strokePath()
+        cg.restoreGState()
+    }
+}
+
+/// Strokes shown through CAShapeLayers: a frame hands Core Animation new paths instead of
+/// rasterizing a large backing store in-process (which also made Core Animation keep a ~30 MB pool
+/// of GPU surfaces for the redrawn layer).
+final class PurrStrokeView: PurrTickingView {
+    var strokes: ((CGSize, Double) -> [PurrStroke])?
+    private let container = CALayer()
+    private var shapes: [CAShapeLayer] = []
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        container.isGeometryFlipped = true
+        container.actions = ["bounds": NSNull(), "position": NSNull()]
+        layer?.addSublayer(container)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        container.frame = bounds
+        shapes.forEach { $0.frame = bounds }
+        CATransaction.commit()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        let scale = window?.backingScaleFactor ?? 2
+        shapes.forEach { $0.contentsScale = scale }
+    }
+
+    override func render(at t: Double) {
+        guard let strokes = strokes else { return }
+        var list: [PurrStroke] = []
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            list = strokes(bounds.size, t)
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let scale = window?.backingScaleFactor ?? 2
+        while shapes.count < list.count {
+            let l = CAShapeLayer()
+            l.fillColor = nil
+            l.lineCap = .round
+            l.lineJoin = .round
+            l.contentsScale = scale
+            l.frame = bounds
+            container.addSublayer(l)
+            shapes.append(l)
+        }
+        for (i, l) in shapes.enumerated() {
+            guard i < list.count else {
+                l.isHidden = true
+                continue
+            }
+            let st = list[i]
+            l.isHidden = false
+            l.path = st.path
+            l.strokeColor = st.color.cgColor
+            l.lineWidth = st.width
+            l.lineDashPattern = st.dash.isEmpty ? nil : st.dash.map { NSNumber(value: Double($0)) }
+        }
+        CATransaction.commit()
+    }
+}
+
+struct PurrStrokeCanvas: NSViewRepresentable {
+    let size: CGSize
+    let interval: () -> TimeInterval?
+    let strokes: (CGSize, Double) -> [PurrStroke]
+
+    func makeNSView(context: Context) -> PurrStrokeView {
+        let v = PurrStrokeView(frame: CGRect(origin: .zero, size: size))
+        v.strokes = strokes
+        v.interval = interval
+        return v
+    }
+
+    func updateNSView(_ nsView: PurrStrokeView, context: Context) {
+        nsView.strokes = strokes
+        nsView.interval = interval
+        nsView.kick()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: PurrStrokeView, context: Context) -> CGSize? {
+        size
+    }
+}
+
+/// Big hero glyphs (PRRRR / zzz) laid out like SwiftUI's `HStack(alignment: .bottom)` of
+/// `Text(.system(size:, weight: .black))`. Each glyph is rendered once into its own layer; a frame
+/// only moves those layers. Redrawing a big glyph area 15 times a second made Core Animation keep a
+/// ~30 MB pool of GPU surfaces; moving static layers needs none.
+struct PurrGlyphRow: Equatable {
+    let chars: [String]
+    let fontSizes: [CGFloat]
+    let colors: [NSColor]
+    let spacing: CGFloat
+    let sizes: [CGSize]
+    let size: CGSize
+
+    init(chars: [String], fontSizes: [CGFloat], colors: [NSColor], spacing: CGFloat) {
+        self.chars = chars
+        self.fontSizes = fontSizes
+        self.colors = colors
+        self.spacing = spacing
+        var sz: [CGSize] = []
+        for i in chars.indices {
+            // Exact advance widths, as SwiftUI lays out Text; only the bitmaps are rounded up.
+            let s = Self.attributed(chars[i], fontSizes[min(i, fontSizes.count - 1)], colors[min(i, colors.count - 1)]).size()
+            sz.append(CGSize(width: s.width, height: ceil(s.height)))
+        }
+        sizes = sz
+        let w = sz.reduce(0) { $0 + $1.width } + spacing * CGFloat(max(0, sz.count - 1))
+        size = CGSize(width: ceil(w), height: sz.map(\.height).max() ?? 0)
+    }
+
+    static func attributed(_ c: String, _ fontSize: CGFloat, _ color: NSColor) -> NSAttributedString {
+        NSAttributedString(string: c, attributes: [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .black),
+            .foregroundColor: color
+        ])
+    }
+
+    func image(_ i: Int, scale: CGFloat) -> CGImage? {
+        let s = sizes[i]
+        let pw = Int((s.width * scale).rounded(.up)), ph = Int((s.height * scale).rounded(.up))
+        guard pw > 0, ph > 0, let cg = CGContext(
+            data: nil, width: pw, height: ph, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+        cg.scaleBy(x: scale, y: scale)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: cg, flipped: false)
+        Self.attributed(chars[i], fontSizes[min(i, fontSizes.count - 1)], colors[min(i, colors.count - 1)]).draw(at: .zero)
+        NSGraphicsContext.restoreGraphicsState()
+        return cg.makeImage()
+    }
+}
+
+final class PurrGlyphView: PurrTickingView {
+    var row: PurrGlyphRow?
+    var margin: CGFloat = 0
+    /// Vertical offset of glyph i at time t (SwiftUI `.offset(y:)`: positive moves down).
+    var offsets: ((Int, Double) -> CGFloat)?
+    private var built: PurrGlyphRow?
+    private var builtScale: CGFloat = 0
+    private var glyphLayers: [CALayer] = []
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        built = nil
+        render(at: PurrClock.ref(Date()))
+    }
+
+    private func rebuildIfNeeded() {
+        guard let row = row, let host = layer else { return }
+        let scale = window?.backingScaleFactor ?? 2
+        if built == row && builtScale == scale { return }
+        glyphLayers.forEach { $0.removeFromSuperlayer() }
+        glyphLayers = row.chars.indices.map { i in
+            let l = CALayer()
+            l.contents = row.image(i, scale: scale)
+            l.contentsScale = scale
+            l.anchorPoint = .zero
+            let sz = row.sizes[i]
+            l.bounds = CGRect(x: 0, y: 0, width: ceil(sz.width), height: sz.height)
+            l.actions = ["position": NSNull(), "bounds": NSNull(), "contents": NSNull()]
+            host.addSublayer(l)
+            return l
+        }
+        built = row
+        builtScale = scale
+    }
+
+    override func render(at t: Double) {
+        rebuildIfNeeded()
+        guard let row = row else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        var x = margin
+        for (i, l) in glyphLayers.enumerated() where i < row.sizes.count {
+            let dy = offsets?(i, t) ?? 0
+            // Unflipped layer space: bottoms aligned on the margin line; +dy (down) lowers y.
+            l.position = CGPoint(x: x, y: margin - dy)
+            x += row.sizes[i].width + row.spacing
+        }
+        CATransaction.commit()
+    }
+}
+
+struct PurrGlyphCanvas: NSViewRepresentable {
+    let row: PurrGlyphRow
+    let margin: CGFloat
+    let interval: () -> TimeInterval?
+    let offsets: (Int, Double) -> CGFloat
+
+    var size: CGSize { CGSize(width: row.size.width + margin * 2, height: row.size.height + margin * 2) }
+
+    func makeNSView(context: Context) -> PurrGlyphView {
+        let v = PurrGlyphView(frame: CGRect(origin: .zero, size: size))
+        updateNSView(v, context: context)
+        return v
+    }
+
+    func updateNSView(_ nsView: PurrGlyphView, context: Context) {
+        nsView.row = row
+        nsView.margin = margin
+        nsView.offsets = offsets
+        nsView.interval = interval
+        nsView.kick()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: PurrGlyphView, context: Context) -> CGSize? {
+        size
+    }
+}
+
+// MARK: - Bounded animation schedules
+/// Frames every `interval` seconds until `until` (nil = no end), then nothing more.
+/// `.animation(paused:)` decides "paused" only when the body is evaluated, so a hover animation
+/// that should stop 0.65 s later kept ticking at 60 fps until something else re-rendered it.
+/// A finite schedule ends on its own.
+struct PurrFrames: TimelineSchedule {
+    var interval: TimeInterval
+    var until: Date? = nil
+    /// After `until`: keep going at this slower interval (ambient motion) instead of stopping.
+    var thenInterval: TimeInterval? = nil
+    var paused: Bool = false
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        if paused {
+            var done = false
+            return AnyIterator {
+                if done { return nil }
+                done = true
+                return startDate
+            }
+        }
+        // Snap to a global grid so every view on the same cadence ticks on the same instant and
+        // SwiftUI commits them in one display cycle (two unaligned 15 fps views = 30 commits/s).
+        func snap(_ d: Date, _ i: TimeInterval) -> Date {
+            let r = d.timeIntervalSinceReferenceDate
+            return Date(timeIntervalSinceReferenceDate: (r / i).rounded(.up) * i)
+        }
+        var t = startDate
+        let end = until
+        let step = interval
+        let slow = thenInterval
+        var first = true
+        return AnyIterator {
+            if first {
+                // Always render the current state immediately, then continue on the grid.
+                first = false
+                let now = t
+                t = snap(now.addingTimeInterval(0.001), step)
+                return now
+            }
+            if let end = end, t > end {
+                guard let slow = slow else { return nil }
+                let n = snap(t, slow)
+                t = n.addingTimeInterval(slow)
+                return n
+            }
+            defer { t += step }
+            return t
+        }
+    }
+}
+
+/// Cat-switch schedule: only the instants where the blink starts / ends (phase 0.94 / 0.99 of a
+/// 4.2 s cycle on the reference clock), plus 60 fps frames while a hover twitch is playing.
+struct PurrBlinkSchedule: TimelineSchedule {
+    var blinking: Bool
+    var twitchUntil: Date
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        let cycle = 4.2
+        let edges = [0.94 * cycle, 0.99 * cycle]
+        var t = startDate
+        var first = true
+        let blinking = self.blinking
+        let twitchUntil = self.twitchUntil
+        return AnyIterator {
+            if first {
+                first = false
+                return t
+            }
+            var next: Date? = nil
+            if t < twitchUntil {
+                next = min(t.addingTimeInterval(1.0 / 60.0), twitchUntil.addingTimeInterval(0.001))
+            }
+            if blinking {
+                let ref = t.timeIntervalSinceReferenceDate
+                let base = floor(ref / cycle) * cycle
+                var edge = Double.infinity
+                for k in 0..<2 {
+                    for e in edges {
+                        let c = base + Double(k) * cycle + e + 0.001
+                        if c > ref + 0.0005 { edge = min(edge, c) }
+                    }
+                }
+                let ed = Date(timeIntervalSinceReferenceDate: edge)
+                next = next.map { min($0, ed) } ?? ed
+            }
+            guard let n = next else { return nil }
+            t = n
+            return n
+        }
+    }
+}
 
 // MARK: - Zero-IOSurface CoreGraphics Canvas Wrapper (eliminates per-Canvas CAMetalLayer / IOSurface overhead)
 struct CGCanvasContext {
@@ -173,11 +636,18 @@ struct CatSwitchView: View {
 
     @State private var localHover: Bool = false
     @State private var twitchStart: TimeInterval = -10.0
+    @State private var twitchUntil: Date = .distantPast
 
     private var isHovered: Bool { localHover || externalHover }
 
+    private func startTwitch() {
+        twitchStart = PurrClock.now()
+        twitchUntil = Date().addingTimeInterval(0.5)
+    }
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: (PurrClock.now() - twitchStart) > 0.5 && !isOn)) { tl in
+        // Blink edges only (2 frames per 4.2 s) plus 60 fps during the 0.45 s hover twitch.
+        TimelineView(PurrBlinkSchedule(blinking: isOn, twitchUntil: twitchUntil)) { tl in
             let now = PurrClock.now()
             let (deg, dy) = evaluateTwitch(elapsed: now - twitchStart, duration: 0.45)
             let t = PurrClock.ref(tl.date)
@@ -228,12 +698,12 @@ struct CatSwitchView: View {
         .onHover { inside in
             localHover = inside
             if inside {
-                twitchStart = PurrClock.now()
+                startTwitch()
             }
         }
         .onChange(of: externalHover) { _, newValue in
             if newValue {
-                twitchStart = PurrClock.now()
+                startTwitch()
             }
         }
     }
@@ -318,33 +788,60 @@ struct PurrIconView: View {
 
     @State private var selfHover: Bool = false
     @State private var hoverStartedAt: TimeInterval = -10.0
+    /// Wall-clock end of the current hover animation; distantFuture while the pointer is inside.
+    @State private var animateUntil: Date = .distantPast
 
     private var activeHover: Bool { isHovered || (allowSelfHover && selfHover) }
 
-    var body: some View {
-        let shouldAnimate = activeHover || (PurrClock.now() - hoverStartedAt < 0.65)
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !shouldAnimate)) { _ in
-            let now = PurrClock.now()
-            let elapsed = now - hoverStartedAt
-            let prog: Double = min(1.0, max(0.0, elapsed / 0.55))
-            let wave: Double = activeHover ? sin(now * 6.5) : (elapsed < 0.65 ? sin(prog * .pi * 2.0) * (1.0 - prog) : 0.0)
+    private func hoverChanged(_ inside: Bool) {
+        if inside {
+            hoverStartedAt = PurrClock.now()
+            animateUntil = .distantFuture
+        } else {
+            // Let the settle-out wave finish (0.65 s after the hover began), then stop ticking.
+            let left = max(0.0, 0.65 - (PurrClock.now() - hoverStartedAt))
+            animateUntil = Date().addingTimeInterval(left + 0.05)
+        }
+    }
 
-            PurrCanvasView(size: CGSize(width: size, height: size)) { ctx, sz in
-                drawIcon(ctx: &ctx, sz: sz, now: now, elapsed: elapsed, prog: prog, wave: wave, shouldAnimate: shouldAnimate)
+    private func drawFrame(_ ctx: inout CGCanvasContext, _ sz: CGSize, now: Double) {
+        let shouldAnimate = activeHover || (now - hoverStartedAt < 0.65)
+        let elapsed = now - hoverStartedAt
+        let prog: Double = min(1.0, max(0.0, elapsed / 0.55))
+        let wave: Double = activeHover ? sin(now * 6.5) : (elapsed < 0.65 ? sin(prog * .pi * 2.0) * (1.0 - prog) : 0.0)
+        drawIcon(ctx: &ctx, sz: sz, now: now, elapsed: elapsed, prog: prog, wave: wave, shouldAnimate: shouldAnimate)
+    }
+
+    var body: some View {
+        let wantsFrames = activeHover || (PurrClock.now() - hoverStartedAt < 0.65) || animateUntil > Date()
+        Group {
+            if wantsFrames && !PurrSnapshot.active {
+                // Hover wiggle: the icon redraws itself (30 fps) in its own small layer while the pointer
+                // is on it and for the 0.65 s settle-out. Through SwiftUI every one of those frames
+                // re-laid-out the whole window (~15-20 % CPU for a pointer resting on an icon).
+                let icon = self
+                PurrDrivenCanvas(
+                    size: CGSize(width: size, height: size),
+                    interval: { icon.activeHover || PurrClock.now() - icon.hoverStartedAt < 0.65 ? 1.0 / 30.0 : nil },
+                    draw: { ctx, sz, _ in icon.drawFrame(&ctx, sz, now: PurrClock.now()) }
+                )
+            } else {
+                TimelineView(PurrFrames(interval: 1.0 / 60.0, until: activeHover ? .distantFuture : animateUntil, paused: !wantsFrames)) { _ in
+                    let now = PurrClock.now()
+                    PurrCanvasView(size: CGSize(width: size, height: size)) { ctx, sz in
+                        drawFrame(&ctx, sz, now: now)
+                    }
+                }
             }
         }
         .frame(width: size, height: size)
         .onHover { inside in
             guard allowSelfHover else { return }
             selfHover = inside
-            if inside {
-                hoverStartedAt = PurrClock.now()
-            }
+            hoverChanged(inside || isHovered)
         }
         .onChange(of: isHovered) { _, newVal in
-            if newVal {
-                hoverStartedAt = PurrClock.now()
-            }
+            hoverChanged(newVal || (allowSelfHover && selfHover))
         }
     }
 

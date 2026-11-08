@@ -84,10 +84,12 @@ struct OverviewPageView: View {
                         .padding(.bottom, 10)
                 } else if store.isAwake {
                     PurrHeroText(mode: store.mode, load: store.load, ink: theme.ink)
+                        .allowsHitTesting(false)
                         .padding(.bottom, 8)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 } else {
                     SleepingZzzView(ink: theme.ink)
+                        .allowsHitTesting(false)
                         .padding(.bottom, 12)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
@@ -751,22 +753,40 @@ struct SleepingZzzView: View {
     @ObservedObject private var vis = PurrVisibility.shared
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !vis.mainWindowVisible)) { tl in
-            let t = PurrClock.ref(tl.date)
-            HStack(alignment: .bottom, spacing: 10) {
-                Text("z")
-                    .font(.system(size: 56, weight: .black))
-                    .foregroundColor(ink.opacity(0.25))
-                    .offset(y: CGFloat(sin(t * 1.25) * 4.0))
-                Text("z")
-                    .font(.system(size: 92, weight: .black))
-                    .foregroundColor(ink.opacity(0.50))
-                    .offset(y: CGFloat(sin(t * 1.25 - 1.6) * 6.0))
-                Text("z")
-                    .font(.system(size: 136, weight: .black))
-                    .foregroundColor(ink)
-                    .offset(y: CGFloat(sin(t * 1.25 - 3.2) * 8.0))
+        if PurrSnapshot.active {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !vis.mainWindowVisible)) { tl in
+                let t = PurrClock.ref(tl.date)
+                HStack(alignment: .bottom, spacing: 10) {
+                    Text("z")
+                        .font(.system(size: 56, weight: .black))
+                        .foregroundColor(ink.opacity(0.25))
+                        .offset(y: CGFloat(sin(t * 1.25) * 4.0))
+                    Text("z")
+                        .font(.system(size: 92, weight: .black))
+                        .foregroundColor(ink.opacity(0.50))
+                        .offset(y: CGFloat(sin(t * 1.25 - 1.6) * 6.0))
+                    Text("z")
+                        .font(.system(size: 136, weight: .black))
+                        .foregroundColor(ink)
+                        .offset(y: CGFloat(sin(t * 1.25 - 3.2) * 8.0))
+                }
             }
+        } else {
+            // Slow 5 s bob (max ~10 px/s): 15 fps looks the same as 30.
+            let row = PurrGlyphRow(
+                chars: ["z", "z", "z"],
+                fontSizes: [56, 92, 136],
+                colors: [NSColor(ink.opacity(0.25)), NSColor(ink.opacity(0.50)), NSColor(ink)],
+                spacing: 10
+            )
+            let m: CGFloat = 12
+            PurrGlyphCanvas(
+                row: row,
+                margin: m,
+                interval: { 1.0 / 15.0 },
+                offsets: { i, t in CGFloat(sin(t * 1.25 - 1.6 * Double(i)) * (4.0 + 2.0 * Double(i))) }
+            )
+            .padding(-m)
         }
     }
 }
@@ -781,20 +801,41 @@ struct PurrHeroText: View {
         let chars: [String] = mode == "global" ? ["P","R","R","R","R"] : (mode == "direct" ? ["m","r","r","p","."] : ["p","r","r","r","r"])
         let opacities: [Double] = mode == "rule" ? [1.0, 1.0, 1.0, 0.55, 0.25] : [1.0, 1.0, 1.0, 1.0, 1.0]
         let fontSize: CGFloat = mode == "global" ? 116 : 136
+        let amp = 1.5 + load * 4.0
+        let freq = mode == "global" ? 100.0 : 70.0
+        let spacing: CGFloat = mode == "global" ? 8 : 4
 
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: mode == "direct" || !vis.mainWindowVisible)) { tl in
-            let t = PurrClock.ref(tl.date)
-            let amp = 1.5 + load * 4.0
-            let freq = mode == "global" ? 100.0 : 70.0
-            HStack(alignment: .bottom, spacing: mode == "global" ? 8 : 4) {
-                ForEach(0..<chars.count, id: \.self) { i in
-                    let dy = (i > 0 && mode != "direct") ? CGFloat(sin(t * freq + Double(i) * 2.1) * amp) : 0
-                    Text(chars[i])
-                        .font(.system(size: fontSize, weight: .black))
-                        .foregroundColor(ink.opacity(opacities[i]))
-                        .offset(y: dy)
+        if PurrSnapshot.active {
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: mode == "direct" || !vis.mainWindowVisible)) { tl in
+                let t = PurrClock.ref(tl.date)
+                HStack(alignment: .bottom, spacing: spacing) {
+                    ForEach(0..<chars.count, id: \.self) { i in
+                        let dy = (i > 0 && mode != "direct") ? CGFloat(sin(t * freq + Double(i) * 2.1) * amp) : 0
+                        Text(chars[i])
+                            .font(.system(size: fontSize, weight: .black))
+                            .foregroundColor(ink.opacity(opacities[i]))
+                            .offset(y: dy)
+                    }
                 }
             }
+        } else {
+            // The purr jitter is an ~11-16 Hz shake, already beyond what 30 fps can follow; 15 fps
+            // reads the same at half the frames.
+            let row = PurrGlyphRow(
+                chars: chars,
+                fontSizes: [fontSize],
+                colors: opacities.map { NSColor(ink.opacity($0)) },
+                spacing: spacing
+            )
+            let m: CGFloat = 8
+            let direct = mode == "direct"
+            PurrGlyphCanvas(
+                row: row,
+                margin: m,
+                interval: { direct ? nil : 1.0 / 15.0 },
+                offsets: { i, t in (i > 0 && !direct) ? CGFloat(sin(t * freq + Double(i) * 2.1) * amp) : 0 }
+            )
+            .padding(-m)
         }
     }
 }

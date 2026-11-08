@@ -225,58 +225,70 @@ struct PurrEarBandView: View {
     var body: some View {
         GeometryReader { geo in
             let w = Double(geo.size.width)
-            let isSettled = !store.isAwake && !store.holding && (PurrClock.now() - store.pageChangedAt > 0.6)
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: isSettled || !vis.mainWindowVisible)) { tl in
-                let nowSec = PurrClock.ref(tl.date)
-                let t = nowSec * 1000.0
-                let (earX, sp) = store.currentEarX(width: w, now: PurrClock.now())
-
-                ZStack(alignment: .topLeading) {
-                    PurrCanvasView(size: CGSize(width: geo.size.width, height: 136)) { ctx, size in
+            // Ear band: 30 fps only while something moves under the user's hand (ear sliding to a new
+            // tab, hold-to-wake, flood); the awake breathing wave runs at 15 fps; asleep and settled =
+            // no frames. Drawn by a display-link view, so a frame costs no SwiftUI update at all.
+            let moveLeft = max(0.0, 0.6 - (PurrClock.now() - store.pageChangedAt))
+            let bandStrokes: (CGSize, Double) -> [PurrStroke] = { size, nowSec in
+                        var out: [PurrStroke] = []
+                        let t = nowSec * 1000.0
+                        let (earX, sp) = store.currentEarX(width: w, now: PurrClock.now())
                         let width = Double(size.width)
                         let y0 = 76.0
                         let hop = (1.0 - sp * 0.55) * (store.errKind != nil ? 0.5 : 1.0)
                         let stretch = 1.0 + sp * 0.6
                         let maxX = Int(width)
 
+                        // Read the store once per frame, not once per point (~600 points, each read
+                        // went through @Published getters and String compares).
+                        let awake = store.isAwake
+                        let hasErr = store.errKind != nil
+                        let isGlobal = store.mode == "global"
+                        let isDirect = store.mode == "direct"
+                        let load = store.load
+                        let holding = store.holding
+                        let holdProgress = store.holdProgress
+                        let br = 0.55 + 0.45 * sin(t / 900.0)
+
                         func yAt(_ xi: Int) -> CGFloat {
                             let x = Double(xi)
                             let dx = (x - earX) / stretch
                             var y = y0 + Self.earOffset(dx) * hop
 
-                            if store.isAwake && store.errKind != nil {
+                            if awake && hasErr {
                                 let d = abs(x - earX)
                                 if d > 46 {
                                     let f = max(0.0, 1.0 - (d - 46.0) / 320.0)
                                     let zig = 1.0 - abs(x.truncatingRemainder(dividingBy: 8.0) - 4.0) / 4.0
                                     y -= f * zig * (6.0 + 2.5 * sin(t / 60.0 + x * 0.7))
                                 }
-                            } else if store.isAwake {
-                                let br = 0.55 + 0.45 * sin(t / 900.0)
+                            } else if awake {
                                 let d = abs(x - earX) / width
-                                var a = (1.1 + store.load * 4.5) * br * (1.0 - d * 0.5)
-                                if store.mode == "global" {
+                                var a = (1.1 + load * 4.5) * br * (1.0 - d * 0.5)
+                                if isGlobal {
                                     a = a * 1.5 + 1.4
-                                } else if store.mode == "direct" {
+                                } else if isDirect {
                                     a = 0
                                 } else {
                                     let near = max(0.0, 1.0 - abs(x - earX) / 80.0)
                                     let seg = min(1.0, max(0.0, (sin((x - t * 0.06) / 34.0) + 0.15) * 2.4))
                                     a *= max(near, seg)
                                 }
-                                y += sin(x * 0.42 + t / 18.0) * a + sin(x * 0.11 - t / 60.0) * a * 0.6
-                                if store.mode == "direct" {
+                                if a != 0 {
+                                    y += sin(x * 0.42 + t / 18.0) * a + sin(x * 0.11 - t / 60.0) * a * 0.6
+                                }
+                                if isDirect {
                                     y += sin(x * 0.018 - t / 800.0) * 2.0
                                 }
-                            } else if store.holding {
-                                y += sin(x * 0.42 + t / 30.0) * store.holdProgress * 2.4
+                            } else if holding {
+                                y += sin(x * 0.42 + t / 30.0) * holdProgress * 2.4
                             }
                             return CGFloat(y)
                         }
 
                         func buildSubpath(from f: Int, to endIdx: Int) -> Path {
-                            var p = Path()
-                            guard f <= endIdx, f <= maxX else { return p }
+                            let p = CGMutablePath()
+                            guard f <= endIdx, f <= maxX else { return Path(p) }
                             let limit = min(endIdx, maxX)
                             p.move(to: CGPoint(x: CGFloat(f), y: yAt(f)))
                             var i = f + 2
@@ -285,18 +297,18 @@ struct PurrEarBandView: View {
                                 i += 2
                             }
                             p.addLine(to: CGPoint(x: CGFloat(limit), y: yAt(limit)))
-                            return p
+                            return Path(p)
                         }
 
                         func strokeSegment(from f: Int, to endIdx: Int) {
                             let path = buildSubpath(from: f, to: endIdx)
                             if store.tunEnabled {
-                                ctx.stroke(path, with: .color(theme.ink), style: StrokeStyle(lineWidth: 8.0, lineCap: .round, lineJoin: .round))
-                                ctx.stroke(path, with: .color(theme.bg), style: StrokeStyle(lineWidth: 3.2, lineCap: .round, lineJoin: .round))
+                                out.append(PurrStroke(path: path.cgPath, color: NSColor(theme.ink), width: 8.0, dash: []))
+                                out.append(PurrStroke(path: path.cgPath, color: NSColor(theme.bg), width: 3.2, dash: []))
                             } else if store.isAwake && !store.sysProxy {
-                                ctx.stroke(path, with: .color(theme.ink), style: StrokeStyle(lineWidth: 3.0, lineCap: .round, lineJoin: .round, dash: [5, 8]))
+                                out.append(PurrStroke(path: path.cgPath, color: NSColor(theme.ink), width: 3.0, dash: [5, 8]))
                             } else {
-                                ctx.stroke(path, with: .color(theme.ink), style: StrokeStyle(lineWidth: 3.0, lineCap: .round, lineJoin: .round))
+                                out.append(PurrStroke(path: path.cgPath, color: NSColor(theme.ink), width: 3.0, dash: []))
                             }
                         }
 
@@ -304,33 +316,63 @@ struct PurrEarBandView: View {
                         if !store.isAwake && store.holdProgress > 0 {
                             let split = Int(round(width * store.holdProgress))
                             let warmPath = buildSubpath(from: 0, to: split)
-                            ctx.stroke(warmPath, with: .color(theme.warm), style: StrokeStyle(lineWidth: 3.6, lineCap: .round, lineJoin: .round))
+                            out.append(PurrStroke(path: warmPath.cgPath, color: NSColor(theme.warm), width: 3.6, dash: []))
                             strokeSegment(from: split, to: endIdx)
                         } else if store.isAwake && store.holdProgress > 0 {
                             let split = Int(round(width * store.holdProgress))
                             let sleepPath = buildSubpath(from: 0, to: split)
-                            ctx.stroke(sleepPath, with: .color(theme.ink.opacity(0.35)), style: StrokeStyle(lineWidth: 3.0, lineCap: .round, lineJoin: .round))
+                            out.append(PurrStroke(path: sleepPath.cgPath, color: NSColor(theme.ink.opacity(0.35)), width: 3.0, dash: []))
                             strokeSegment(from: split, to: endIdx)
                         } else {
                             strokeSegment(from: 0, to: endIdx)
                         }
+                        return out
+            }
+            ZStack(alignment: .topLeading) {
+                if PurrSnapshot.active {
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+                        PurrCanvasView(size: CGSize(width: geo.size.width, height: 136)) { ctx, size in
+                            for st in bandStrokes(size, PurrClock.ref(tl.date)) { st.stroke(in: ctx.cg) }
+                        }
                     }
+                } else {
+                    // Shape layers: a frame only hands Core Animation new paths, nothing is
+                    // rasterized into a 2400x272 backing store here.
+                    PurrStrokeCanvas(
+                        size: CGSize(width: geo.size.width, height: 136),
+                        interval: { [store] in
+                            let moving = PurrClock.now() - store.pageChangedAt < 0.6
+                            if store.holding || store.floodAnimating || moving { return 1.0 / 30.0 }
+                            return store.isAwake ? 1.0 / 15.0 : nil
+                        },
+                        strokes: bandStrokes
+                    )
+                }
 
-                    // Tip label (.tip)
-                    let tipX = min(w - 115.0, max(120.0, earX + 92.0))
-                    tipView
-                        .position(x: tipX, y: 18)
+                // Tip label and grab area only move while the ear slides to a new tab.
+                TimelineView(PurrFrames(
+                    interval: 1.0 / 30.0,
+                    until: Date().addingTimeInterval(moveLeft),
+                    paused: !vis.mainWindowVisible || moveLeft <= 0
+                )) { _ in
+                    let (earX, _) = store.currentEarX(width: w, now: PurrClock.now())
+                    ZStack(alignment: .topLeading) {
+                        // Tip label (.tip)
+                        let tipX = min(w - 115.0, max(120.0, earX + 92.0))
+                        tipView
+                            .position(x: tipX, y: 18)
 
-                    // Grab area over the cat ears (#grab)
-                    Color.white.opacity(0.001)
-                        .frame(width: 120, height: 72)
-                        .contentShape(Rectangle())
-                        .position(x: earX, y: 44)
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { _ in store.beginHold() }
-                                .onEnded { _ in store.endHold() }
-                        )
+                        // Grab area over the cat ears (#grab)
+                        Color.white.opacity(0.001)
+                            .frame(width: 120, height: 72)
+                            .contentShape(Rectangle())
+                            .position(x: earX, y: 44)
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { _ in store.beginHold() }
+                                    .onEnded { _ in store.endHold() }
+                            )
+                    }
                 }
             }
 

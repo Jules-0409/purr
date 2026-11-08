@@ -795,7 +795,11 @@ fn start_motion() {
             LAST_TICK.with(|tick| tick.set(Some(now)));
             let millis = started.elapsed().as_secs_f32() * 1000.0;
             with_ui(|ui| {
-                if !ui.window().is_visible() {
+                let shown = ui.window().is_visible() && !ui.window().is_minimized();
+                if ui.global::<IconClock>().get_shown() != shown {
+                    ui.global::<IconClock>().set_shown(shown);
+                }
+                if !shown {
                     return;
                 }
                 let (down, _flow, history) = LIVE

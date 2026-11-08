@@ -138,10 +138,44 @@ pub fn authorized_core() -> Option<PathBuf> {
     if fs::metadata(&bundled).ok()?.len() != meta.len() {
         return None;
     }
-    if fs::read(&path).ok()? != fs::read(&bundled).ok()? {
+    if !same_contents(&path, &bundled)? {
         return None;
     }
     Some(path)
+}
+
+/// Byte-compares two files in 64 KiB chunks. Reading both ~56 MB cores whole with `fs::read`
+/// left ~110 MB of freed-but-retained heap in the app after every check.
+#[cfg(target_os = "macos")]
+fn same_contents(a: &std::path::Path, b: &std::path::Path) -> Option<bool> {
+    use std::io::Read;
+    let mut fa = std::io::BufReader::with_capacity(1 << 16, fs::File::open(a).ok()?);
+    let mut fb = std::io::BufReader::with_capacity(1 << 16, fs::File::open(b).ok()?);
+    let mut ba = vec![0u8; 1 << 16];
+    let mut bb = vec![0u8; 1 << 16];
+    loop {
+        let na = read_full(&mut fa, &mut ba)?;
+        let nb = read_full(&mut fb, &mut bb)?;
+        if na != nb || ba[..na] != bb[..nb] {
+            return Some(false);
+        }
+        if na == 0 {
+            return Some(true);
+        }
+    }
+
+    fn read_full(r: &mut impl Read, buf: &mut [u8]) -> Option<usize> {
+        let mut n = 0;
+        while n < buf.len() {
+            match r.read(&mut buf[n..]) {
+                Ok(0) => break,
+                Ok(k) => n += k,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => return None,
+            }
+        }
+        Some(n)
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -406,6 +440,26 @@ fn unquote(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn same_contents_compares_in_chunks() {
+        let dir = std::env::temp_dir().join(format!("purr-same-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let big: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        let (a, b, c) = (dir.join("a"), dir.join("b"), dir.join("c"));
+        fs::write(&a, &big).unwrap();
+        fs::write(&b, &big).unwrap();
+        let mut other = big.clone();
+        other[150_000] ^= 1;
+        fs::write(&c, &other).unwrap();
+        assert_eq!(same_contents(&a, &b), Some(true));
+        assert_eq!(same_contents(&a, &c), Some(false));
+        fs::write(&c, &big[..199_999]).unwrap();
+        assert_eq!(same_contents(&a, &c), Some(false));
+        assert_eq!(same_contents(&a, &dir.join("missing")), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn patch_rewrites_only_top_level_keys() {

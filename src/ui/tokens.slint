@@ -22,7 +22,9 @@ export global Theme {
     in-out property <color> line: target-line;
 }
 
-export global IconClock { in-out property <float> time: 0; in-out property <bool> awake: false; in-out property <bool> reduced: false; }
+export global IconClock { in-out property <float> time: 0; in-out property <bool> awake: false; in-out property <bool> reduced: false;
+    // false while the main window is hidden or minimized; gates the always-on blink timers.
+    in-out property <bool> shown: true; }
 
 export component ThemeMotion inherits Rectangle {
     width: 0px; height: 0px;

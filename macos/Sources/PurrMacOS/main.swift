@@ -390,7 +390,6 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
-        window.isMovableByWindowBackground = true
         window.level = .normal
         mountMainContentView()
         window.center()
@@ -444,11 +443,33 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
             object: window,
             queue: .main
         ) { [weak self] _ in
-            guard let self = self else { return }
-            let visible = self.window.occlusionState.contains(.visible)
-            if PurrVisibility.shared.mainWindowVisible != visible {
-                PurrVisibility.shared.mainWindowVisible = visible
+            self?.refreshWindowVisibility()
+        }
+        // Display asleep / screen locked / fast user switch: nothing is drawn, so stop animating.
+        let ws = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.screensDidSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.screensAwake = false
+                self?.refreshWindowVisibility()
             }
+        }
+        for name in [NSWorkspace.screensDidWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.screensAwake = true
+                self?.refreshWindowVisibility()
+            }
+        }
+        refreshWindowVisibility()
+    }
+
+    private var screensAwake = true
+
+    private func refreshWindowVisibility() {
+        guard let window = window else { return }
+        let visible = screensAwake && window.isVisible && window.occlusionState.contains(.visible)
+            && window.contentView is NSHostingView<PurrMainView>
+        if PurrVisibility.shared.mainWindowVisible != visible {
+            PurrVisibility.shared.mainWindowVisible = visible
         }
     }
 
@@ -467,7 +488,24 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
         hostingView.layer?.cornerCurve = .continuous
         hostingView.layer?.masksToBounds = true
         window.contentView = hostingView
+        // With isMovableByWindowBackground on, AppKit re-walks the whole SwiftUI responder tree to
+        // rebuild the drag regions on every display cycle (~20 % of the main thread while animating).
+        // Only keep it on while the pointer is over the window, which is the only time a drag can start.
+        window.isMovableByWindowBackground = false
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: dragToggle,
+            userInfo: nil
+        )
+        dragToggle.window = window
+        hostingView.addTrackingArea(area)
+        if let w = window, w.frame.contains(NSEvent.mouseLocation) {
+            w.isMovableByWindowBackground = true
+        }
     }
+
+    private let dragToggle = PurrDragToggle()
 
     /// Releases the 1200x760 window backing buffers so standby memory drops to ~20-30 MB
     private func suspendWindowToTray() {
@@ -506,6 +544,7 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
         clampWindowToVisibleScreen()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async { [weak self] in self?.refreshWindowVisibility() }
     }
 
     private func setupTray() {
@@ -596,9 +635,17 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
         return img
     }
 
+    /// What the menu-bar image last showed; the image is only rebuilt when this changes.
+    private var statusImageKey: String = ""
+
     private func updateStatusItemAppearance() {
         guard let btn = statusItem?.button else { return }
         let awake = store.isAwake && !store.firstRun && !store.disclaimerPending
+        let showSpeed = awake && store.errKind == nil && store.statsReady
+        let key = "\(awake)|\(store.errKind != nil)|\(showSpeed)|"
+            + (showSpeed ? PurrRate.compact(store.upSpeed) + "|" + PurrRate.compact(store.dnSpeed) : "")
+        if key == statusImageKey, btn.image != nil { return }
+        statusImageKey = key
         btn.title = ""
         btn.imagePosition = .imageOnly
         btn.image = makeCatEarStatusImage(
@@ -665,6 +712,21 @@ final class PurrAppDelegate: NSObject, NSApplicationDelegate {
             }
             return event
         }
+    }
+}
+
+/// Turns window-background dragging on only while the pointer is inside the main window.
+final class PurrDragToggle: NSResponder {
+    weak var window: NSWindow?
+
+    override func mouseEntered(with event: NSEvent) {
+        window?.isMovableByWindowBackground = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        // Mid-drag the pointer can lag outside the frame for a moment; keep it on while the button is down.
+        if NSEvent.pressedMouseButtons & 1 != 0 { return }
+        window?.isMovableByWindowBackground = false
     }
 }
 

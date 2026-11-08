@@ -514,17 +514,32 @@ pub async fn lookup_direct_place() -> Option<String> {
     None
 }
 
-pub async fn lookup_place() -> String {
-    let proxy = format!("http://127.0.0.1:{}", crate::config::mixed_port());
-    let Ok(proxy) = reqwest::Proxy::all(&proxy) else {
-        return "暂时不知道".to_string();
-    };
-    let Ok(client) = reqwest::Client::builder()
+/// One proxied client per mixed port, reused by the 20 s exit-place check instead of building a new
+/// rustls client each time. No idle connections are kept: a pooled tunnel would stay on the old node
+/// after a node switch and report a stale exit IP.
+fn place_client() -> Option<reqwest::Client> {
+    static CLIENT: std::sync::Mutex<Option<(u16, reqwest::Client)>> = std::sync::Mutex::new(None);
+    let port = crate::config::mixed_port();
+    let mut slot = CLIENT.lock().ok()?;
+    if let Some((p, c)) = slot.as_ref() {
+        if *p == port {
+            return Some(c.clone());
+        }
+    }
+    let proxy = reqwest::Proxy::all(format!("http://127.0.0.1:{port}")).ok()?;
+    let client = reqwest::Client::builder()
         .proxy(proxy)
         .timeout(Duration::from_secs(4))
+        .pool_max_idle_per_host(0)
         .user_agent("purr")
         .build()
-    else {
+        .ok()?;
+    *slot = Some((port, client.clone()));
+    Some(client)
+}
+
+pub async fn lookup_place() -> String {
+    let Some(client) = place_client() else {
         return "暂时不知道".to_string();
     };
     for url in [

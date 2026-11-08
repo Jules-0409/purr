@@ -9,7 +9,7 @@ export component Knob inherits Rectangle {
     Timer { interval: 450ms; running: root.hanim; triggered => { root.hanim = false; } }
     // blink: phase = t mod 4.2 s; eyes squash to 12 % between 94 % and 99 % (step, no easing)
     property <float> kt;
-    Timer { interval: 50ms; running: root.on && !IconClock.reduced; triggered => { root.kt = animation-tick() / 1ms; } }
+    Timer { interval: 50ms; running: root.on && !IconClock.reduced && IconClock.shown; triggered => { root.kt = animation-tick() / 1ms; } }
     property <float> ft: root.hanim && !IconClock.reduced ? animation-tick() / 1ms : 0;
     property <float> phase: Math.mod(root.kt, 4200) / 4200;
     property <float> bs: root.on && !IconClock.reduced && root.phase > 0.94 && root.phase < 0.99 ? 0.12 : 1;

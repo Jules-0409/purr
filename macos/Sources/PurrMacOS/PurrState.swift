@@ -72,7 +72,7 @@ struct PurrTheme {
 }
 
 // MARK: - Models
-struct PurrNode: Identifiable {
+struct PurrNode: Identifiable, Equatable {
     let id: Int
     var name: String
     var proto: String
@@ -106,14 +106,14 @@ struct PurrNode: Identifiable {
     }
 }
 
-struct PurrGroup: Identifiable {
+struct PurrGroup: Identifiable, Equatable {
     let id: Int
     var name: String
     var selected: Int
     var nodeIds: [Int]
 }
 
-struct PurrConn: Identifiable {
+struct PurrConn: Identifiable, Equatable {
     let id: Int
     var rawId: String = ""
     var app: String
@@ -136,7 +136,7 @@ struct PurrLog: Identifiable {
     var msg: String
 }
 
-struct PurrRuleItem: Identifiable {
+struct PurrRuleItem: Identifiable, Equatable {
     let id: Int
     var kind: String
     var match: String
@@ -145,7 +145,7 @@ struct PurrRuleItem: Identifiable {
     var hits: Int?
 }
 
-struct PurrSubItem: Identifiable {
+struct PurrSubItem: Identifiable, Equatable {
     let id: Int
     var name: String
     var desc: String
@@ -942,10 +942,14 @@ final class PurrStore: ObservableObject {
         }
     }
 
-    func plog(_ level: String, _ msg: String) {
+    private static let logTimeFormatter: DateFormatter = {
         let df = DateFormatter()
         df.dateFormat = "HH:mm:ss"
-        let t = df.string(from: Date())
+        return df
+    }()
+
+    func plog(_ level: String, _ msg: String) {
+        let t = Self.logTimeFormatter.string(from: Date())
         logs.insert(PurrLog(time: t, level: level, msg: msg), at: 0)
         if logs.count > 40 {
             logs = Array(logs.prefix(40))
@@ -1302,27 +1306,27 @@ final class PurrStore: ObservableObject {
             return
         }
 
-        self.memMB = snap["mem_mb"] as? Double
-        self.memShellMB = snap["mem_shell_mb"] as? Double
-        self.memCoreMB = snap["mem_core_mb"] as? Double
-        self.cpuPct = snap["cpu_pct"] as? Double
-        self.realExitIp = snap["exit_ip"] as? String ?? "—"
-        self.realExitLoc = snap["exit_loc"] as? String ?? ""
-        self.exitState = snap["exit_state"] as? String ?? "pending"
-        self.directIp = snap["direct_ip"] as? String ?? "—"
-        self.directLoc = snap["direct_loc"] as? String ?? ""
-        self.directState = snap["direct_state"] as? String ?? "pending"
+        assign(\.memMB, snap["mem_mb"] as? Double)
+        assign(\.memShellMB, snap["mem_shell_mb"] as? Double)
+        assign(\.memCoreMB, snap["mem_core_mb"] as? Double)
+        assign(\.cpuPct, snap["cpu_pct"] as? Double)
+        assign(\.realExitIp, snap["exit_ip"] as? String ?? "—")
+        assign(\.realExitLoc, snap["exit_loc"] as? String ?? "")
+        assign(\.exitState, snap["exit_state"] as? String ?? "pending")
+        assign(\.directIp, snap["direct_ip"] as? String ?? "—")
+        assign(\.directLoc, snap["direct_loc"] as? String ?? "")
+        assign(\.directState, snap["direct_state"] as? String ?? "pending")
         if let tun = snap["tun"] as? Bool {
-            self.tunEnabled = tun
+            assign(\.tunEnabled, tun)
         }
-        self.todayTotal = snap["today_total"] as? String
-        self.todayDown = snap["today_down"] as? String
-        self.todayUp = snap["today_up"] as? String
-        self.routeProxy = snap["route_proxy"] as? String
-        self.routeDirect = snap["route_direct"] as? String
-        self.routeProxyFraction = snap["route_proxy_fraction"] as? Double
-        self.statsReady = snap["ready"] as? Bool ?? false
-        self.blockedMice = snap["blocked_count"] as? Int
+        assign(\.todayTotal, snap["today_total"] as? String)
+        assign(\.todayDown, snap["today_down"] as? String)
+        assign(\.todayUp, snap["today_up"] as? String)
+        assign(\.routeProxy, snap["route_proxy"] as? String)
+        assign(\.routeDirect, snap["route_direct"] as? String)
+        assign(\.routeProxyFraction, snap["route_proxy_fraction"] as? Double)
+        assign(\.statsReady, snap["ready"] as? Bool ?? false)
+        assign(\.blockedMice, snap["blocked_count"] as? Int)
 
         // Trouble detected by the core (same rules as Windows): drive the existing trouble UI.
         let coreTrouble = snap["trouble"] as? String ?? ""
@@ -1335,26 +1339,31 @@ final class PurrStore: ObservableObject {
         if isAwake {
             let dn = snap["dn_mb_s"] as? Double ?? 0.0
             let up = snap["up_mb_s"] as? Double ?? 0.0
-            self.dnSpeed = dn
-            self.upSpeed = up
-            self.load = min(1.0, dn / 16.0)
+            assign(\.dnSpeed, dn)
+            assign(\.upSpeed, up)
+            assign(\.load, min(1.0, dn / 16.0))
             let secs = max(0, Int(Date().timeIntervalSince(connectedAt)))
-            self.elapsedStr = String(format: "%02d:%02d:%02d", secs / 3600, (secs / 60) % 60, secs % 60)
+            assign(\.elapsedStr, String(format: "%02d:%02d:%02d", secs / 3600, (secs / 60) % 60, secs % 60))
             if sampleTraffic && self.statsReady {
                 let n = PurrStore.historySamples
-                self.histDn.append(dn)
-                if self.histDn.count > n { self.histDn.removeFirst(self.histDn.count - n) }
-                self.histUp.append(up)
-                if self.histUp.count > n { self.histUp.removeFirst(self.histUp.count - n) }
-                self.histCount = min(n, self.histCount + 1)
-                self.peakDn = self.histDn.suffix(self.histCount).max() ?? 0.0
-                self.peakUp = self.histUp.suffix(self.histCount).max() ?? 0.0
+                // Build each ring once and publish it once (bounded to historySamples).
+                var d = self.histDn
+                d.append(dn)
+                if d.count > n { d.removeFirst(d.count - n) }
+                var u = self.histUp
+                u.append(up)
+                if u.count > n { u.removeFirst(u.count - n) }
+                self.histDn = d
+                self.histUp = u
+                assign(\.histCount, min(n, self.histCount + 1))
+                assign(\.peakDn, self.histDn.suffix(self.histCount).max() ?? 0.0)
+                assign(\.peakUp, self.histUp.suffix(self.histCount).max() ?? 0.0)
             }
         }
 
         // Subscriptions
         if let rawSubs = snap["subscriptions"] as? [[String: Any]] {
-            self.subscriptions = rawSubs.compactMap { s in
+            let builtSubs: [PurrSubItem] = rawSubs.compactMap { s in
                 guard let id = s["id"] as? Int,
                       let name = s["name"] as? String else { return nil }
                 return PurrSubItem(
@@ -1368,6 +1377,7 @@ final class PurrStore: ObservableObject {
                     daysLeft: s["days_left"] as? Int
                 )
             }
+            assign(\.subscriptions, builtSubs)
         }
 
         // Groups & Nodes
@@ -1439,22 +1449,22 @@ final class PurrStore: ObservableObject {
             }
 
             if !builtNodes.isEmpty && !builtGroups.isEmpty {
-                self.nodes = builtNodes
-                self.groups = builtGroups
+                assign(\.nodes, builtNodes)
+                assign(\.groups, builtGroups)
                 if self.selectedGroupIdx >= builtGroups.count {
-                    self.selectedGroupIdx = 0
+                    assign(\.selectedGroupIdx, 0)
                 }
-                self.firstRun = false
+                assign(\.firstRun, false)
             } else if self.subscriptions.isEmpty {
-                self.firstRun = true
+                assign(\.firstRun, true)
             }
         } else if self.subscriptions.isEmpty {
-            self.firstRun = true
+            assign(\.firstRun, true)
         }
 
         // Connections
         if let rawConns = snap["connections"] as? [[String: Any]] {
-            self.conns = rawConns.enumerated().map { idx, c in
+            let builtConns: [PurrConn] = rawConns.enumerated().map { idx, c in
                 PurrConn(
                     id: idx + 1,
                     rawId: c["id"] as? String ?? "",
@@ -1469,11 +1479,12 @@ final class PurrStore: ObservableObject {
                     ageText: c["age"] as? String ?? ""
                 )
             }
+            assign(\.conns, builtConns)
         }
 
         // Rules
         if let rawRules = snap["rules"] as? [[String: Any]], !rawRules.isEmpty {
-            self.allRules = rawRules.enumerated().map { idx, r in
+            let builtRules: [PurrRuleItem] = rawRules.enumerated().map { idx, r in
                 PurrRuleItem(
                     id: idx + 1,
                     kind: r["kind"] as? String ?? "—",
@@ -1482,7 +1493,15 @@ final class PurrStore: ObservableObject {
                     hits: (r["hits"] as? NSNumber)?.intValue
                 )
             }
+            assign(\.allRules, builtRules)
         }
+    }
+
+    /// Writes a published value only when it changed. Every @Published write fires
+    /// objectWillChange, so writing ~30 unchanged values each second re-rendered the whole window.
+    @inline(__always)
+    private func assign<T: Equatable>(_ kp: ReferenceWritableKeyPath<PurrStore, T>, _ value: T) {
+        if self[keyPath: kp] != value { self[keyPath: kp] = value }
     }
 
     private var lastSyncSec: TimeInterval = 0
