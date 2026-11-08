@@ -4,6 +4,21 @@ A native Rust + Slint desktop client for Mihomo, based on the PURR v5 desktop pr
 
 Current status: the supplied Slint frontend is integrated with the real backend. Combined RSS still exceeds 150 MB on macOS; Windows runtime validation is pending.
 
+## Download (下载)
+
+Intro page: **[liujufu.dev/purr](https://liujufu.dev/purr/)**
+
+| Platform | File |
+| --- | --- |
+| Windows 10/11 x64 installer | [Purr-Windows-x64-Setup.exe](https://liujufu.dev/purr/downloads/Purr-Windows-x64-Setup.exe) |
+| Windows x64 portable | [Purr-Windows-x64.zip](https://liujufu.dev/purr/downloads/Purr-Windows-x64.zip) |
+| macOS 14+ (Apple silicon) | [Purr-macOS-arm64.dmg](https://liujufu.dev/purr/downloads/Purr-macOS-arm64.dmg) |
+| macOS 14+ (Apple silicon) portable | [Purr-macOS-arm64.zip](https://liujufu.dev/purr/downloads/Purr-macOS-arm64.zip) |
+
+Checksums: [SHA256SUMS.txt](https://liujufu.dev/purr/downloads/SHA256SUMS.txt)
+
+The macOS app is ad-hoc signed and not notarized. If macOS blocks the first open, allow it in **System Settings → Privacy & Security** (系统设置 → 隐私与安全性) and choose **Open Anyway**. On first launch PURR shows a usage notice; type **我已阅读并同意** to continue.
+
 ## Windows
 
 Use the x64 installer, or extract the entire portable ZIP and run `Purr.exe`. Keep its `resources` folder beside the executable. The package includes a SHA-256-verified Mihomo v1.19.33 x64 compatible build. The app statically links the Microsoft C runtime.
