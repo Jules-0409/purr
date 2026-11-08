@@ -231,6 +231,7 @@ fn resident_bytes_impl(pid: u32) -> Option<u64> {
         private: usize,
     }
     #[link(name = "kernel32")]
+    #[allow(clashing_extern_declarations)]
     unsafe extern "system" {
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
         fn K32GetProcessMemoryInfo(process: *mut c_void, counters: *mut Counters, size: u32)

@@ -64,6 +64,7 @@ pub struct Chart {
     pub peak: String,
 }
 
+#[allow(dead_code)]
 const EAR: [(f32, f32); 7] = [
     (-50.0, 0.0),
     (-33.0, -46.0),
@@ -981,6 +982,7 @@ pub fn ascii_cat(kind: &str, alt: bool, tail: f64) -> Vec<(i32, f32, String)> {
             }
             "offline" | "sub" => {
                 let d_head = ((x + 0.20) / 0.40).hypot((y + 0.30) / 0.34);
+                #[allow(clippy::type_complexity)]
                 let (el, er): (&[(f64, f64)], &[(f64, f64)]) = if kind == "sub" {
                     (
                         &[(-0.56, -0.38), (-0.66, -0.76), (-0.28, -0.56)],

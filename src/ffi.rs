@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! C-ABI FFI bindings for macOS SwiftUI native frontend to drive Purr's real Rust + mihomo engine.
+// The exported C functions take raw pointers from Swift by design; null checks are done inside.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
