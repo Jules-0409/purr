@@ -85,7 +85,8 @@ struct PurrTopBarView: View {
                 } else {
                     let n = store.currentPrimaryNode
                     stateBadge(dot: "●", text: "呼噜中", inverted: true)
-                    // 2. Node + Latency Pill
+                    // 2. Node + Latency Pill (only once the core sent a real node)
+                    if !store.groups.isEmpty {
                     Button(action: { store.page = 1 }) {
                         HStack(spacing: 5) {
                             Text(n.name)
@@ -100,6 +101,7 @@ struct PurrTopBarView: View {
                         .overlay(RoundedRectangle(cornerRadius: 3).stroke(theme.line, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
+                    }
 
                     // 3. IP Chip
                     ipChip(ip: ip)

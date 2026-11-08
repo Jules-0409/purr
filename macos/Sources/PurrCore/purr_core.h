@@ -28,6 +28,8 @@ int32_t purr_core_close_all_connections(void);
 int32_t purr_core_close_connection(const char* id);
 char* purr_core_snapshot_json(void);
 char* purr_core_check_update_json(void);
+/// {"ok":bool,"message":str}; action "swap" or "retry" acts on the trouble the core detected.
+char* purr_core_fix_trouble_json(const char* action);
 char* purr_core_load_preferences_json(void);
 int32_t purr_core_update_preference(const char* key, const char* value);
 int32_t purr_core_set_system_proxy(bool enabled);

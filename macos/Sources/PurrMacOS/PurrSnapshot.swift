@@ -83,8 +83,12 @@ enum PurrSnapshot {
         s.realExitLoc = "东京 · JP"
         s.directIp = "198.51.100.7"
         s.directLoc = "上海 · CN · 本地宽带"
-        s.totalProxyMB = 2090
-        s.totalDirectMB = 1190
+        s.todayTotal = "3.28 GB"
+        s.todayDown = "2.62 GB"
+        s.todayUp = "0.66 GB"
+        s.routeProxy = "2.09 GB"
+        s.routeDirect = "1.19 GB"
+        s.routeProxyFraction = 2090.0 / 3280.0
         s.blockedMice = 1284
         s.memMB = 22
         s.statsReady = true
@@ -106,13 +110,14 @@ enum PurrSnapshot {
         s.upSpeed = ok ? 2.9 : 0
         s.load = ok ? min(1, 11.7 / 16) : 0
         var hd: [Double] = []
-        for i in 0..<120 {
+        for i in 0..<PurrStore.historySamples {
             let x = Double(i)
             let v: Double = 8.0 + 5.0 * sin(x / 11.0) + 2.0 * sin(x / 3.0)
             hd.append(ok ? v : 0.0)
         }
         s.histDn = hd
         s.histUp = s.histDn.map { $0 * 0.26 }
+        s.histCount = ok ? PurrStore.historySamples : 0
         s.peakDn = s.histDn.max() ?? 0
         s.peakUp = s.histUp.max() ?? 0
         let hosts: [(String, String, String)] = [
@@ -274,9 +279,57 @@ enum PurrSnapshot {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { step(0) }
     }
 
+    /// `PURR_SNAPSHOT_REAL=unavailable` or `=/abs/snapshot.json`: renders every page through the
+    /// real `applySnapshot` path instead of the demo fixture — first with nothing measured, then
+    /// (for a file) with a snapshot the running core produced (`debug-snapshot.json`).
+    @MainActor
+    static func runReal(store: PurrStore, source: String, dir: String) {
+        let pages: [(String, Int, String)] = [
+            ("overview", 0, "live"), ("nodes", 1, "live"), ("subscriptions", 2, "live"),
+            ("connections", 3, "live"), ("logs", 3, "log"), ("rules", 4, "live"), ("settings", 5, "live")
+        ]
+        var queue: [(String, () -> Void, Bool)] = []
+        for p in pages {
+            queue.append(("mac-real-unavailable-\(p.0)", { store.isAwake = true; store.page = p.1; store.connPane = p.2 }, false))
+        }
+        queue.append(("mac-real-unavailable-tray", { store.page = 0 }, true))
+        if source != "unavailable", let json = try? String(contentsOfFile: source, encoding: .utf8) {
+            for p in pages {
+                queue.append(("mac-real-populated-\(p.0)", {
+                    store.isAwake = true
+                    store.connectedAt = Date().addingTimeInterval(-754)
+                    store.applySnapshot(json, sampleTraffic: p.0 == "overview")
+                    store.page = p.1; store.connPane = p.2
+                }, false))
+            }
+            queue.append(("mac-real-populated-tray", { store.page = 0 }, true))
+            queue.append(("mac-real-populated-detail", { store.page = 0; store.showServiceDetail = true }, false))
+        }
+        func step(_ i: Int) {
+            if i >= queue.count { print("snapshot: done"); exit(0) }
+            let (name, apply, tray) = queue[i]
+            apply()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                let path = "\(dir)/\(name).png"
+                if tray {
+                    render(PurrTrayPopoverView(store: store, onOpenMain: {}).fixedSize(), size: CGSize(width: 308, height: 470), to: path, dark: false)
+                } else {
+                    render(PurrMainView(store: store), size: CGSize(width: 1200, height: 760), to: path, dark: false)
+                }
+                step(i + 1)
+            }
+        }
+        step(0)
+    }
+
     @MainActor
     static func run(store: PurrStore) {
         guard let dir = dir else { return }
+        if let real = ProcessInfo.processInfo.environment["PURR_SNAPSHOT_REAL"], !real.isEmpty {
+            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            runReal(store: store, source: real, dir: dir)
+            return
+        }
         if let script = ProcessInfo.processInfo.environment["PURR_SNAPSHOT_SCRIPT"], !script.isEmpty {
             try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
             runScript(store: store, path: script, dir: dir)

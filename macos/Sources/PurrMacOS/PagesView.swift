@@ -172,7 +172,7 @@ struct OverviewPageView: View {
 
             // 4 Route Cards (.routes)
             HStack(spacing: 8) {
-                ForEach(store.groups.indices, id: \.self) { gi in
+                ForEach(store.groups.indices.filter { store.nodes.indices.contains(store.groups[$0].selected) }, id: \.self) { gi in
                     let g = store.groups[gi]
                     let n = store.nodes[g.selected]
                     let isBad = store.errKind == "timeout" && g.selected == store.badNodeId
@@ -207,6 +207,9 @@ struct OverviewPageView: View {
                     .fontWeight(.bold)
                     .underline()
                     .foregroundColor(theme.ink)
+            } else if store.isAwake && store.groups.isEmpty && store.mode != "direct" {
+                Text(store.modeLabel).fontWeight(.bold).foregroundColor(theme.ink)
+                Text(store.statsReady ? "：内核还没有给出节点。" : "：内核还没有回应，暂时拿不到节点。").foregroundColor(theme.mute)
             } else if store.isAwake {
                 switch store.mode {
                 case "global":
@@ -282,12 +285,15 @@ struct OverviewPageView: View {
     }
 
     private var statsGrid: some View {
-        let totGB = (store.totalProxyMB + store.totalDirectMB) / 1024.0
-        let pxCount = store.conns.filter { $0.pol != "DIRECT" }.count
+        // Only connections that really go through a node (REJECT never does).
+        let pxCount = store.conns.filter { $0.pol != "DIRECT" && $0.pol != "REJECT" }.count
+        let drCount = store.conns.filter { $0.pol == "DIRECT" }.count
+        let today = (store.todayTotal ?? "—").split(separator: " ", maxSplits: 1).map(String.init)
+        let peak = { (v: Double) -> String in store.histCount > 0 ? store.rateText(v) : "—" }
         return VStack(spacing: 0) {
             HStack(spacing: 20) {
-                statCell(label: "DOWN · 下行网速 ↓", value: store.rateParts(store.dnSpeed).0, unit: store.rateParts(store.dnSpeed).1, sub: "60 秒峰值 " + store.rateText(store.peakDn), showBottomBorder: true)
-                statCell(label: "UP · 上行网速 ↑", value: store.rateParts(store.upSpeed).0, unit: store.rateParts(store.upSpeed).1, sub: "60 秒峰值 " + store.rateText(store.peakUp), showBottomBorder: true)
+                statCell(label: "DOWN · 下行网速 ↓", value: store.rateParts(store.dnSpeed).0, unit: store.rateParts(store.dnSpeed).1, sub: "60 秒峰值 " + peak(store.peakDn), showBottomBorder: true)
+                statCell(label: "UP · 上行网速 ↑", value: store.rateParts(store.upSpeed).0, unit: store.rateParts(store.upSpeed).1, sub: "60 秒峰值 " + peak(store.peakUp), showBottomBorder: true)
             }
             .frame(maxHeight: .infinity)
 
@@ -301,9 +307,9 @@ struct OverviewPageView: View {
                 )
                 statCell(
                     label: "TODAY",
-                    value: String(format: "%.2f", totGB),
-                    unit: "GB",
-                    sub: String(format: "↓ %.2f · ↑ %.2f GB", totGB * 0.8, totGB * 0.2),
+                    value: today.first ?? "—",
+                    unit: today.count > 1 ? today[1] : nil,
+                    sub: "↓ \(store.todayDown ?? "—") · ↑ \(store.todayUp ?? "—")",
                     showBottomBorder: true
                 )
             }
@@ -314,7 +320,7 @@ struct OverviewPageView: View {
                     label: "CONNECTIONS",
                     value: "\(store.conns.count)",
                     unit: "条",
-                    sub: store.isAwake ? "经过窝点 \(pxCount) · 直连 \(store.conns.count - pxCount)" : "睡着时没有连接",
+                    sub: store.isAwake ? "经过窝点 \(pxCount) · 直连 \(drCount)" : "睡着时没有连接",
                     showBottomBorder: false
                 )
                 memoryCell
@@ -349,6 +355,7 @@ struct OverviewPageView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(theme.mute)
                 .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) {
@@ -365,27 +372,25 @@ struct OverviewPageView: View {
                 .tracking(1.6)
                 .foregroundColor(theme.mute)
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(store.memMB > 0 ? String(format: "%.1f", store.memMB) : "—")
+                Text(store.memMB.map { String(format: "%.1f", $0) } ?? "—")
                     .font(.system(size: 28, weight: .bold, design: .monospaced))
                     .foregroundColor(theme.ink)
                 Text("MB")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .foregroundColor(theme.mute)
             }
-            GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    Rectangle().fill(theme.line)
-                    Rectangle()
-                        .fill(theme.ink)
-                        .frame(width: g.size.width * min(1.0, CGFloat(store.memMB / 128.0)))
-                }
-            }
-            .frame(height: 6)
-            let cpu = store.isAwake ? String(format: "%.1f", 0.3 + store.dnSpeed * 0.07) : "0.1"
-            Text("CPU \(cpu)% · 上限 128 MB\(store.tunEnabled ? " · TUN +14" : "")")
+            // Measured split (Purr / core, decimal MB) and measured CPU; no invented limit.
+            let mb = { (v: Double?) -> String in v.map { String(format: "%.0f", $0) } ?? "—" }
+            Text("Purr \(mb(store.memShellMB)) · 内核 \(mb(store.memCoreMB)) MB")
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(theme.mute)
                 .lineLimit(1)
+            if let cpu = store.cpuPct {
+                Text(String(format: "CPU %.1f%%", cpu))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(theme.mute)
+                    .lineLimit(1)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
@@ -412,15 +417,15 @@ struct OverviewPageView: View {
                 .foregroundColor(theme.mute)
                 .padding(.trailing, 16)
 
-                Text("PEAK " + store.rateText(store.peakDn).uppercased())
+                Text("PEAK " + (store.histCount > 0 ? store.rateText(store.peakDn).uppercased() : "—"))
                     .font(.system(size: 11, design: .monospaced))
                     .tracking(1.6)
                     .foregroundColor(theme.mute)
             }
 
             GeometryReader { scopeGeo in
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !store.isAwake || !vis.mainWindowVisible)) { tl in
-                    let t = PurrClock.ref(tl.date) * 1000.0
+                // Data lines are drawn exactly at their values: zero traffic is flat on the 0 line.
+                Group {
                     PurrCanvasView(size: scopeGeo.size) { ctx, size in
                         let w = size.width
                         let h = size.height
@@ -451,11 +456,7 @@ struct OverviewPageView: View {
                             var p = Path()
                             for (j, v) in arr.enumerated() {
                                 let x = CGFloat(j) / CGFloat(arr.count - 1) * chartW
-                                var y = yPos(v)
-                                if store.isAwake && store.mode != "direct" {
-                                    y += CGFloat(sin(Double(j) * 1.3 + t / 40.0) * (0.5 + v / 14.0))
-                                }
-                                y = max(top - 3, min(bot, y))
+                                let y = max(top, min(bot, yPos(v)))
                                 if j == 0 { p.move(to: CGPoint(x: x, y: y)) }
                                 else { p.addLine(to: CGPoint(x: x, y: y)) }
                             }
@@ -480,9 +481,8 @@ struct OverviewPageView: View {
     }
 
     private var sidePanel: some View {
-        let tot = store.totalProxyMB + store.totalDirectMB
-        let pp = tot > 0 ? store.totalProxyMB / tot : 0
-        let activeSub = store.subscriptions.first(where: { $0.active }) ?? store.subscriptions.first ?? PurrSubItem(id: 0, name: "未导入订阅", desc: "请先导入订阅", used: -1, total: 0, exp: "—", active: true)
+        let pp = store.routeProxyFraction ?? 0
+        let activeSub = store.subscriptions.first(where: { $0.active }) ?? store.subscriptions.first
         let isSubErr = store.errKind == "sub"
 
         return VStack(alignment: .leading, spacing: 18) {
@@ -516,23 +516,23 @@ struct OverviewPageView: View {
                     HStack {
                         Text("■ 经过窝点 ")
                             .foregroundColor(theme.mute)
-                        + Text(String(format: "%.2f GB", store.totalProxyMB / 1024.0))
+                        + Text(store.routeProxy ?? "—")
                             .fontWeight(.bold).foregroundColor(theme.ink)
-                        + Text(tot > 0 ? " · \(Int(round(pp * 100)))%" : " · —")
+                        + Text(store.routeProxyFraction != nil ? " · \(Int(round(pp * 100)))%" : " · —")
                             .foregroundColor(theme.mute)
 
                         Spacer()
 
                         Text("▨ 直连 ")
                             .foregroundColor(theme.mute)
-                        + Text(String(format: "%.2f GB", store.totalDirectMB / 1024.0))
+                        + Text(store.routeDirect ?? "—")
                             .fontWeight(.bold).foregroundColor(theme.ink)
-                        + Text(tot > 0 ? " · \(Int(round((1 - pp) * 100)))%" : " · —")
+                        + Text(store.routeProxyFraction != nil ? " · \(Int(round((1 - pp) * 100)))%" : " · —")
                             .foregroundColor(theme.mute)
                     }
                     Text("抓到 ")
                         .foregroundColor(theme.mute)
-                    + Text("\(store.blockedMice)")
+                    + Text(store.blockedMice.map { "\($0)" } ?? "—")
                         .fontWeight(.bold).foregroundColor(theme.ink)
                     + Text(" 只老鼠（广告 / 追踪）")
                         .foregroundColor(theme.mute)
@@ -546,7 +546,7 @@ struct OverviewPageView: View {
                         .font(.system(size: 11, design: .monospaced))
                         .tracking(1.6)
                         .foregroundColor(theme.mute)
-                    Text(activeSub.name)
+                    Text(activeSub?.name ?? "未导入订阅")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundColor(theme.ink)
                 }
@@ -555,10 +555,12 @@ struct OverviewPageView: View {
                     Text("⚠ 已过期 · 窝点全部停用")
                         .font(.system(size: 11.5, design: .monospaced))
                         .foregroundColor(theme.ink)
-                } else {
-                    Text("\(activeSub.leftText) · \(activeSub.expiryText)")
+                } else if let sub = activeSub {
+                    Text("\(sub.leftText) · \(sub.expiryText)")
                         .font(.system(size: 11.5, design: .monospaced))
                         .foregroundColor(theme.mute)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
             }
             .padding(.top, 6)
@@ -684,10 +686,10 @@ struct ServiceDetailModalView: View {
                         Text("LOCAL DIRECT · 本地宽带 IP")
                             .font(.system(size: 10.5, design: .monospaced))
                             .foregroundColor(theme.mute)
-                        Text(store.directIp)
+                        Text(store.directIpText)
                             .font(.system(size: 18, weight: .bold, design: .monospaced))
                             .foregroundColor(theme.ink)
-                        Text(store.directLoc)
+                        Text(store.directLocText)
                             .font(.system(size: 11.5, design: .monospaced))
                             .foregroundColor(theme.mute)
                     }
@@ -978,6 +980,27 @@ struct NodesPageView: View {
     }
 
     var body: some View {
+        if store.groups.indices.contains(store.selectedGroupIdx),
+           store.nodes.indices.contains(store.groups[store.selectedGroupIdx].selected) {
+            content
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("窝点").font(.system(size: 34, weight: .black)).foregroundColor(theme.ink)
+                    Text("挑个暖和的窝").font(.system(size: 13, weight: .medium)).foregroundColor(theme.mute)
+                }
+                Text(store.statsReady ? "内核还没有给出节点。" : "内核还没有回应，暂时拿不到节点。")
+                    .font(.system(size: 14))
+                    .foregroundColor(theme.mute)
+                    .padding(.top, 36)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         let g = store.groups[store.selectedGroupIdx]
         let selNode = store.nodes[g.selected]
         let detailNodeId = store.hoveredNodeId ?? g.selected
@@ -1465,18 +1488,13 @@ struct ConnectionsPageView: View {
                                 Text(c.rule)
                                     .foregroundColor(theme.mute)
                                     .frame(width: 170, alignment: .leading)
-                                Button(action: {
-                                    store.cycleAppPolicy(for: c.id)
-                                }) {
-                                    policyBadge(pol: c.pol, chain: c.chain)
-                                }
-                                .buttonStyle(.plain)
-                                .help("点击一键切换 \(c.app) 的分流策略（节点选择 / AI 服务 / 流媒体 / 直连）")
+                                // Shows the route the core really used; changing rules is not offered here.
+                                policyBadge(pol: c.pol, chain: c.chain)
                                 .frame(width: 220, alignment: .leading)
                                 Spacer()
                                 Text(fmtKB(c.dn)).frame(width: 90, alignment: .trailing)
                                 Text(fmtKB(c.up)).frame(width: 90, alignment: .trailing)
-                                Text("\(Int(c.age))s").frame(width: 70, alignment: .trailing)
+                                Text(c.ageLabel).frame(width: 70, alignment: .trailing)
                                 Button(action: {
                                     store.closeConnection(id: c.id)
                                 }) {
@@ -1562,6 +1580,8 @@ struct RulesPageView: View {
         let filtered = store.allRules.filter { r in
             q.isEmpty || "\(r.kind) \(r.match) \(r.policy)".lowercased().contains(q)
         }
+        // The core reports per-rule match counts (`extra.hitCount`); without them the column hides.
+        let hasHits = store.allRules.contains { $0.hits != nil }
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -1588,7 +1608,9 @@ struct RulesPageView: View {
                 Text("MATCH").frame(width: 280, alignment: .leading)
                 Text("POLICY").frame(width: 180, alignment: .leading)
                 Spacer()
-                Text("HITS TODAY").frame(width: 120, alignment: .trailing)
+                if hasHits {
+                    Text("HITS · 启动以来").frame(width: 120, alignment: .trailing)
+                }
             }
             .font(.system(size: 10.5, weight: .medium, design: .monospaced))
             .tracking(1.5)
@@ -1618,9 +1640,11 @@ struct RulesPageView: View {
                                 .overlay(Rectangle().stroke(theme.ink, lineWidth: 1))
                                 .frame(width: 180, alignment: .leading)
                             Spacer()
-                            Text("\(r.hits)")
-                                .foregroundColor(theme.ink)
-                                .frame(width: 120, alignment: .trailing)
+                            if hasHits {
+                                Text(r.hits.map { "\($0)" } ?? "—")
+                                    .foregroundColor(theme.ink)
+                                    .frame(width: 120, alignment: .trailing)
+                            }
                         }
                         .font(.system(size: 12, design: .monospaced))
                         .padding(.vertical, 6)
@@ -1729,7 +1753,7 @@ struct SettingsPageView: View {
                         PurrIconView(name: "ov", size: 22, isAwake: store.isAwake, color: theme.ink)
                             .frame(width: 28)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("PURR v0.1.0").font(.system(size: 15, weight: .bold)).foregroundColor(theme.ink)
+                            Text("PURR v\(PurrStore.appVersion)").font(.system(size: 15, weight: .bold)).foregroundColor(theme.ink)
                             Text("mihomo 内核 · 原生桌面代理").font(.system(size: 12)).foregroundColor(theme.mute)
                         }
                         Spacer()

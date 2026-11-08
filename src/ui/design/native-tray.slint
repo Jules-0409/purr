@@ -81,6 +81,8 @@ export component NativeTray inherits Rectangle {
     in property <string> down;
     in property <string> up;
     in property <string> memory;
+    // Real name of the group the listed members belong to; the header hides when unknown.
+    in property <string> group-label;
     in property <string> total;
     in property <string> unit;
     in property <string> trouble;
@@ -117,7 +119,7 @@ export component NativeTray inherits Rectangle {
                 CapBtn { icon: "tun"; label: (root.tun-auth || root.tun-mode) ? "虚拟网卡" : "虚拟网卡 · 需授权"; pressed: root.tun-mode; dim: false; clicked => { root.action("tun", ""); } }
             }
         }
-        TrSec { label: "节点选择"; gap: 4px;
+        TrSec { label: root.group-label; gap: 4px;
             for n in root.nodes: Rectangle {
                 height: 21px;
                 HorizontalLayout { spacing: 8px;

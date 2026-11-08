@@ -250,7 +250,7 @@ export component RulesPage inherits Rectangle {
                 Th { width: 280px; text: "MATCH"; }
                 Th { width: 180px; text: "POLICY"; }
                 Rectangle { horizontal-stretch: 1; }
-                Th { width: 120px; text: "HITS TODAY"; horizontal-alignment: right; }
+                Th { width: 120px; text: "HITS · 启动以来"; horizontal-alignment: right; }
             }
             Rectangle { x: 0; y: parent.height - 1.5px; width: parent.width; height: 1.5px; background: T.ink; }
         }
@@ -310,7 +310,7 @@ component SetHead inherits Rectangle {
 
 export component SettingsPage inherits Rectangle {
     property <string> current-port: S.port;
-    property <string> app-version: "0.1.0";
+    property <string> app-version: S.app-version;
     changed current-port => { port-field.text = self.current-port; }
     PageHead { x: 0; y: 0; width: parent.width; title: "习惯"; sub: "它的小脾气";
         Rectangle { horizontal-stretch: 1; }

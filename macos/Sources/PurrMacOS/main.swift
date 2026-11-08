@@ -98,7 +98,8 @@ struct PurrTrayPopoverView: View {
     var body: some View {
         let theme = PurrTheme.current(isAwake: store.isAwake, mode: store.mode, hasErr: store.errKind != nil, isDark: colorScheme == .dark)
         let n = store.currentPrimaryNode
-        let sortedTop5 = Array(store.groups[0].nodeIds.sorted { store.nodes[$0].sortMs < store.nodes[$1].sortMs }.prefix(5))
+        let validIds = (store.groups.first?.nodeIds ?? []).filter { store.nodes.indices.contains($0) }
+        let sortedTop5 = Array(validIds.sorted { store.nodes[$0].sortMs < store.nodes[$1].sortMs }.prefix(5))
 
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -106,7 +107,7 @@ struct PurrTrayPopoverView: View {
                     Text(store.firstRun ? "没有窝" : (store.errKind != nil ? "卡住了" : (store.isAwake ? (store.mode == "direct" ? "醒着 · 直连" : "呼噜中") : "睡着了")))
                         .font(.system(size: 15, weight: .heavy))
                         .foregroundColor(theme.ink)
-                    Text(store.firstRun ? "先导入订阅" : (store.errKind != nil ? store.troubleInfo(for: store.errKind!).st : (store.isAwake ? (store.mode == "direct" ? "不经过窝点 · \(store.exitInfo().ip)" : "\(n.name) · \(n.msText) · \(store.exitInfo().ip)") : "系统代理已关 · 端口 \(store.mixedPort) 仍在")))
+                    Text(store.firstRun ? "先导入订阅" : (store.errKind != nil ? store.troubleInfo(for: store.errKind!).st : (store.isAwake ? (store.mode == "direct" ? "不经过窝点 · \(store.exitInfo().ip)" : (store.groups.isEmpty ? "—" : "\(n.name) · \(n.msText)") + " · \(store.exitInfo().ip)") : "系统代理已关 · 端口 \(store.mixedPort) 仍在")))
                         .font(.system(size: 10.5, design: .monospaced))
                         .foregroundColor(theme.mute)
                 }
@@ -166,10 +167,13 @@ struct PurrTrayPopoverView: View {
             .overlay(alignment: .top) { Rectangle().fill(theme.line).frame(height: 1) }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("节点选择").font(.system(size: 10, design: .monospaced)).tracking(1.5).foregroundColor(theme.mute)
+                // The real name of the group these members belong to (hidden until the core sent one).
+                if let groupName = store.groups.first?.name {
+                    Text(groupName).font(.system(size: 10, design: .monospaced)).tracking(1.5).foregroundColor(theme.mute)
+                }
                 ForEach(sortedTop5, id: \.self) { i in
                     let nd = store.nodes[i]
-                    let sel = store.groups[0].selected == i
+                    let sel = store.groups.first?.selected == i
                     Button(action: {
                         store.selectNode(inGroup: 0, nodeId: i)
                     }) {
@@ -203,9 +207,9 @@ struct PurrTrayPopoverView: View {
                         .foregroundColor(theme.ink)
                 }
                 Spacer()
-                Text(store.memMB > 0 ? String(format: "内存 %.0f MB", store.memMB) : "内存 —")
+                Text(store.memMB.map { String(format: "内存 %.0f MB", $0) } ?? "内存 —")
                 Spacer()
-                Text(String(format: "今日 %.2f GB", (store.totalProxyMB + store.totalDirectMB) / 1024.0))
+                Text("今日 \(store.todayTotal ?? "—")")
             }
             .font(.system(size: 10.5, design: .monospaced))
             .foregroundColor(theme.mute)

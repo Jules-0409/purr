@@ -65,16 +65,23 @@ export global S {
     in-out property <bool> sites-testing;
     callback probe-sites(bool);
     in-out property <[Route]> routes;
-    in-out property <string> dn: "0.0"; in-out property <string> up: "0.0";
+    in-out property <string> dn: "—"; in-out property <string> up: "—";
+    // Speed units from Rust ("KB/s" below 1 MB/s, "MB/s" above, "" while unknown).
+    in-out property <string> dn-u; in-out property <string> up-u;
+    in-out property <string> app-version;
+    // "CPU 1.2%" measured from process times; empty until two samples.
+    in-out property <string> cpu-s;
+    // Today's routed bytes are known and non-zero (the proxy/direct percentages are real).
+    in-out property <bool> route-known;
     in-out property <string> dn-s; in-out property <string> up-s;
-    in-out property <string> l3: on ? (mode == "direct" ? "AWAKE" : "PURRING") : "LAST NAP"; in-out property <string> tm: "00:00:00"; in-out property <string> tm-s: on ? "本次连接" : "上次睡前呼噜了这么久";
-    in-out property <string> tot: "0"; in-out property <string> tot-s;
+    in-out property <string> l3: on ? (mode == "direct" ? "AWAKE" : "PURRING") : "LAST NAP"; in-out property <string> tm: "—"; in-out property <string> tm-s: on ? "本次连接" : "上次睡前呼噜了这么久";
+    in-out property <string> tot: "—"; in-out property <string> tot-s;
     in-out property <string> cnt: "\{connection-count}"; in-out property <string> cnt-s;
     in-out property <string> mem: "—"; in-out property <float> mem-pct: mem-fraction * 100; in-out property <string> mem-s;
     in-out property <float> chart-mx: 5;
     in-out property <[string]> chart-lbl: ["0 MB/s", chart-mid + " MB/s", chart-max + " MB/s"];
     in-out property <string> chart-dn; in-out property <string> chart-up;
-    in-out property <string> peak: "PEAK 0.0 MB/S";
+    in-out property <string> peak: "PEAK —";
     in-out property <float> sbar-p: proxy-fraction * 100;
     in-out property <styled-text> slg-a: @markdown("经窝点 **\{proxy-detail}**"); in-out property <styled-text> slg-b: @markdown("直连 **\{direct-detail}**"); in-out property <styled-text> slg-c: @markdown("抓住 **\{blocked-detail}** 只老鼠 · 连接采样");
     in-out property <bool> subi-warn; in-out property <string> subi-n; in-out property <styled-text> subi-r: @markdown("\{sub-detail}");
@@ -132,7 +139,7 @@ export global S {
     in-out property <float> tray-t0: -10000;
     in-out property <string> trt: first ? "没有窝" : err != "" ? "卡住了" : on ? "呼噜中" : "睡着了"; in-out property <string> trs: node-label;
     in-out property <[TrayNode]> tray-nodes;
-    in-out property <styled-text> trm-a: @markdown("↓ **\{dn}** ↑ **\{up}** MB/s"); in-out property <styled-text> trm-b: @markdown("内存 **\{mem}** MB"); in-out property <styled-text> trm-c: @markdown("今日 **\{tot}** \{total-unit}");
+    in-out property <styled-text> trm-a: @markdown("↓ **\{dn}** \{dn-u} ↑ **\{up}** \{up-u}"); in-out property <styled-text> trm-b: @markdown("内存 **\{mem}** MB"); in-out property <styled-text> trm-c: @markdown("今日 **\{tot}** \{total-unit}");
     in-out property <string> tre-label: trouble-action; in-out property <string> tre-key: "primary";
 
     in-out property <string> import-url;
@@ -150,6 +157,8 @@ export global S {
     in-out property <string> node-label;
     in-out property <string> node-delay: "—"; // e.g. "32ms" for the current node
     in-out property <string> group-name;
+    // Display name (emoji dropped) of the group the tray lists.
+    in-out property <string> group-label;
     in-out property <string> rule-stat;
     in-out property <string> chart-max: "5";
     in-out property <string> chart-mid: "2.5";

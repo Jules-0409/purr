@@ -49,6 +49,9 @@ pub struct Rule {
     pub payload: String,
     pub policy: String,
     pub tone: i32,
+    /// The core's own match count for this rule since it started (`extra.hitCount`); None when the
+    /// core does not report it.
+    pub hits: Option<u64>,
 }
 
 pub struct Wave {
@@ -141,13 +144,19 @@ pub fn format_hms(seconds: u64) -> String {
     )
 }
 
-/// Speed for display. Below 1 MiB/s it switches to KB/s: one decimal of MB/s rounds every
+/// One decimal (SI) unit rule for every size and speed Purr shows: 1 KB = 1000 B, 1 MB = 10^6 B,
+/// 1 GB = 10^9 B. It matches what subscription providers print for their quotas.
+pub const KB: f64 = 1e3;
+pub const MB: f64 = 1e6;
+pub const GB: f64 = 1e9;
+
+/// Speed for display. Below 1 MB/s it switches to KB/s: one decimal of MB/s rounds every
 /// ordinary browsing rate (under ~50 KB/s) down to "0.0".
 pub fn rate_parts(bytes: u64) -> (String, String) {
-    if bytes >= 1024 * 1024 {
-        (format!("{:.1}", bytes as f64 / 1048576.), "MB/s".into())
+    if bytes as f64 >= MB {
+        (format!("{:.1}", bytes as f64 / MB), "MB/s".into())
     } else {
-        (format!("{:.0}", bytes as f64 / 1024.), "KB/s".into())
+        (format!("{:.0}", bytes as f64 / KB), "KB/s".into())
     }
 }
 pub fn rate_text(bytes: u64) -> String {
@@ -163,9 +172,6 @@ pub fn is_reject_log(payload: &str) -> bool {
     payload.contains(" using REJECT") && !payload.starts_with("[UDP]")
 }
 pub fn size_text(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = 1024.0 * 1024.0;
-    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
     let value = bytes as f64;
     if value >= GB {
         format!("{:.2} GB", value / GB)
@@ -176,6 +182,22 @@ pub fn size_text(bytes: u64) -> String {
     } else {
         format!("{bytes} B")
     }
+}
+
+/// A quota in whole decimal GB as providers print it; one decimal below 10 GB so a 2 GB trial plan
+/// with 0.4 GB used is not shown as "0 / 2" (or rounded up to 1).
+pub fn gb_text(bytes: u64) -> String {
+    let gb = bytes as f64 / GB;
+    if gb < 10.0 {
+        format!("{gb:.1}")
+    } else {
+        format!("{gb:.0}")
+    }
+}
+
+/// Memory in decimal MB (same unit as every other size here).
+pub fn mb_text(bytes: u64) -> String {
+    format!("{:.1}", bytes as f64 / MB)
 }
 
 pub fn place_from_json(value: &Value) -> Option<String> {
@@ -263,6 +285,23 @@ pub fn proxy_groups(root: &Value) -> Vec<ProxyGroup> {
     groups
 }
 
+/// The group the tray and the overview act on. Global mode: GLOBAL. Otherwise the top-level select
+/// group — one no other group contains, e.g. "🌍 出口" holding the fallback "🇺🇸 US" — then any
+/// select group, then the first group. mihomo lists groups alphabetically, so "first group" alone
+/// can land on an inner fallback such as "Ⓜ Meta".
+pub fn main_group<'a>(groups: &'a [ProxyGroup], mode: &str) -> Option<&'a ProxyGroup> {
+    if mode == "global" {
+        return groups.iter().find(|g| g.name == "GLOBAL");
+    }
+    let rest = || groups.iter().filter(|g| g.name != "GLOBAL");
+    let nested = |name: &str| rest().any(|g| g.nodes.iter().any(|n| n.name == name));
+    rest()
+        .find(|g| g.kind == "select" && !nested(&g.name))
+        .or_else(|| rest().find(|g| g.kind == "select"))
+        .or_else(|| rest().next())
+        .or(groups.first())
+}
+
 pub fn connections_from(value: &Value, now: SystemTime) -> (Vec<Conn>, Totals) {
     let totals = Totals {
         down: size_text(number(value.get("downloadTotal"))),
@@ -324,6 +363,7 @@ pub fn rules_from(value: &Value) -> Vec<Rule> {
                 payload: text_at(item, "payload"),
                 policy: policy_label(policy),
                 tone: policy_kind(policy),
+                hits: rule_hits(item),
             }
         })
         .collect()
@@ -331,6 +371,29 @@ pub fn rules_from(value: &Value) -> Vec<Rule> {
 
 /// PurrEarBandView.earOffset: straight segments between the ear points, with a cosine
 /// dome across the crown (-15 … 15).
+/// `extra.hitCount` of one `/rules` entry (mihomo ≥ 1.19.x); None when absent.
+pub fn rule_hits(item: &Value) -> Option<u64> {
+    item.get("extra")?.get("hitCount")?.as_u64()
+}
+
+/// The protocol a member really connects with: a nested group (fallback "🇺🇸 US" inside
+/// "🌍 出口") is followed through `now` to the node it currently uses. None when the chain cannot
+/// be resolved (unknown name or a loop).
+#[cfg_attr(not(test), allow(dead_code))] // used by the macOS FFI (lib), not the Windows binary
+pub fn leaf_kind(root: &Value, name: &str) -> Option<String> {
+    let proxies = root.get("proxies")?.as_object()?;
+    let mut current = name;
+    for _ in 0..6 {
+        let item = proxies.get(current)?;
+        let kind = item.get("type").and_then(Value::as_str).unwrap_or("");
+        if !is_group(kind) {
+            return Some(pretty_kind(kind));
+        }
+        current = item.get("now").and_then(Value::as_str)?;
+    }
+    None
+}
+
 pub fn ear_offset(dx: f32, k: f32) -> f32 {
     const PTS: [(f32, f32); 7] = [
         (-50.0, 0.0),
@@ -616,29 +679,53 @@ fn wave_path(points: &[(f32, f32)], dashed: bool) -> String {
     }
     out
 }
-pub fn chart(hist: &[(u64, u64)], width: f32, height: f32, phase: Option<f32>) -> Chart {
+/// Samples the overview chart and its "60 秒峰值" cover: one per second, so exactly the last 60 s.
+pub const HISTORY_SAMPLES: usize = 60;
+
+/// Appends one per-second sample and keeps only the last `HISTORY_SAMPLES`.
+pub fn push_history(hist: &mut Vec<(u64, u64)>, sample: (u64, u64)) {
+    hist.push(sample);
+    if hist.len() > HISTORY_SAMPLES {
+        let extra = hist.len() - HISTORY_SAMPLES;
+        hist.drain(0..extra);
+    }
+}
+
+/// Highest download rate in the last `HISTORY_SAMPLES` samples; None when there are none.
+pub fn peak_down(hist: &[(u64, u64)]) -> Option<u64> {
+    hist[hist.len().saturating_sub(HISTORY_SAMPLES)..]
+        .iter()
+        .map(|(_, d)| *d)
+        .max()
+}
+
+pub fn peak_up(hist: &[(u64, u64)]) -> Option<u64> {
+    hist[hist.len().saturating_sub(HISTORY_SAMPLES)..]
+        .iter()
+        .map(|(u, _)| *u)
+        .max()
+}
+
+/// The traffic chart: the data lines are drawn exactly at their values (zero traffic is a flat line
+/// on the zero grid line); nothing decorative is added to them.
+pub fn chart(hist: &[(u64, u64)], width: f32, height: f32) -> Chart {
     let w = (width - 58.0).max(1.0);
     let top = 8.0;
     let bottom = (height - 20.0).max(top + 1.0);
-    let peak = hist.iter().map(|(_, d)| *d).max().unwrap_or(0) as f32 / 1048576.0;
+    let peak = peak_down(hist).unwrap_or(0) as f32 / MB as f32;
     let max = (peak / 5.0).ceil().max(1.0) * 5.0;
     let y = |v: f32| bottom - v / max * (bottom - top);
-    let tail = &hist[hist.len().saturating_sub(120)..];
-    let mut samples = vec![(0u64, 0u64); 120usize.saturating_sub(tail.len())];
+    let n = HISTORY_SAMPLES;
+    let tail = &hist[hist.len().saturating_sub(n)..];
+    let mut samples = vec![(0u64, 0u64); n.saturating_sub(tail.len())];
     samples.extend_from_slice(tail);
     let points = |up: bool| {
         samples
             .iter()
             .enumerate()
             .map(|(i, (u, d))| {
-                let value = if up { *u } else { *d } as f32 / 1048576.0;
-                let wiggle = phase
-                    .map(|t| (i as f32 * 1.3 + t / 40.).sin() * (0.5 + value / 14.))
-                    .unwrap_or(0.);
-                (
-                    i as f32 / 119.0 * w,
-                    (y(value) + wiggle).clamp(top - 3., bottom),
-                )
+                let value = if up { *u } else { *d } as f32 / MB as f32;
+                (i as f32 / (n - 1) as f32 * w, y(value).clamp(top, bottom))
             })
             .collect::<Vec<_>>()
     };
@@ -676,7 +763,7 @@ pub fn chart(hist: &[(u64, u64)], width: f32, height: f32, phase: Option<f32>) -
             .iter()
             .map(|v| format!("M0 {:.1} H{w:.1} ", y(*v)))
             .collect(),
-        peak: format!("{peak:.1} MB/s"),
+        peak: rate_text(peak_down(hist).unwrap_or(0)),
     }
 }
 
@@ -850,11 +937,16 @@ fn number(value: Option<&Value>) -> u64 {
     value.and_then(Value::as_u64).unwrap_or(0)
 }
 
-fn age_text(start: &str, now: SystemTime) -> String {
-    let Some(start) = parse_rfc3339(start) else {
+/// Seconds since a connection's RFC 3339 `start` (offset honoured); None when it does not parse.
+pub fn age_secs(start: &str, now: SystemTime) -> Option<u64> {
+    let start = parse_rfc3339(start)?;
+    Some(now.duration_since(start).map(|d| d.as_secs()).unwrap_or(0))
+}
+
+pub fn age_text(start: &str, now: SystemTime) -> String {
+    let Some(seconds) = age_secs(start, now) else {
         return "—".to_string();
     };
-    let seconds = now.duration_since(start).map(|d| d.as_secs()).unwrap_or(0);
     if seconds < 60 {
         format!("{seconds}s")
     } else if seconds < 3600 {
@@ -864,7 +956,7 @@ fn age_text(start: &str, now: SystemTime) -> String {
     }
 }
 
-fn parse_rfc3339(text: &str) -> Option<SystemTime> {
+pub fn parse_rfc3339(text: &str) -> Option<SystemTime> {
     if text.len() < 19 {
         return None;
     }
@@ -1221,18 +1313,21 @@ mod tests {
     }
 
     #[test]
-    fn rates_and_sizes_use_binary_units() {
+    fn rates_and_sizes_use_decimal_units() {
         assert_eq!(
-            rate_parts(5 * 1024 * 1024),
+            rate_parts(5_000_000),
             ("5.0".to_string(), "MB/s".to_string())
         );
-        assert_eq!(rate_parts(1536), ("2".to_string(), "KB/s".to_string()));
+        assert_eq!(rate_parts(1500), ("2".to_string(), "KB/s".to_string()));
         assert_eq!(rate_parts(0), ("0".to_string(), "KB/s".to_string()));
-        assert_eq!(
-            rate_parts(30 * 1024),
-            ("30".to_string(), "KB/s".to_string())
-        );
-        assert_eq!(rate_text(1024 * 1024), "1.0 MB/s");
+        assert_eq!(rate_parts(30_000), ("30".to_string(), "KB/s".to_string()));
+        assert_eq!(rate_parts(999_999).1, "KB/s");
+        assert_eq!(rate_text(1_000_000), "1.0 MB/s");
+        // A provider quota of 883 GB used (as the provider prints it) is shown as 883, not 822.
+        assert_eq!(gb_text(883_000_000_000), "883");
+        assert_eq!(gb_text(400_000_000), "0.4");
+        assert_eq!(size_text(1_500_000_000), "1.50 GB");
+        assert_eq!(mb_text(95_000_000), "95.0");
         assert!(is_reject_log(
             "[TCP] 127.0.0.1:56829 --> stats.g.doubleclick.net:443 match DomainSuffix(doubleclick.net) using REJECT"
         ));
@@ -1245,7 +1340,7 @@ mod tests {
         assert!(!is_reject_log(
             "[TCP] 127.0.0.1:1 --> github.com:443 match Match using 🌍 出口[东京]"
         ));
-        assert_eq!(size_text(1024), "1 KB");
+        assert_eq!(size_text(1000), "1 KB");
     }
 
     #[test]
@@ -1333,5 +1428,55 @@ mod tests {
     fn rfc3339_offsets_collapse_to_epoch() {
         assert_eq!(parse_rfc3339("1970-01-01T00:00:00Z"), Some(UNIX_EPOCH));
         assert_eq!(parse_rfc3339("1970-01-01T08:00:00+08:00"), Some(UNIX_EPOCH));
+    }
+
+    #[test]
+    fn connection_age_honours_the_offset() {
+        // mihomo writes local time with an offset; 17:01:12+08:00 is 09:01:12 UTC.
+        let start = "2026-11-08T17:01:12.27+08:00";
+        let then = parse_rfc3339(start).unwrap();
+        let now = then + Duration::from_secs(125);
+        assert_eq!(age_secs(start, now), Some(125));
+        assert_eq!(age_text(start, now), "2m05s");
+        assert_eq!(
+            parse_rfc3339("2026-11-08T09:01:12Z"),
+            parse_rfc3339("2026-11-08T17:01:12+08:00")
+        );
+        assert_eq!(age_secs("garbage", now), None);
+        assert_eq!(age_text("", now), "—");
+    }
+
+    #[test]
+    fn chart_covers_sixty_seconds_and_zero_is_flat() {
+        let mut hist = Vec::new();
+        for i in 0..150u64 {
+            push_history(&mut hist, (i, i * 1000));
+        }
+        assert_eq!(hist.len(), HISTORY_SAMPLES);
+        assert_eq!(hist[0], (90, 90_000));
+        assert_eq!(peak_down(&hist), Some(149_000));
+        assert_eq!(peak_down(&[]), None);
+        let zeros = vec![(0u64, 0u64); HISTORY_SAMPLES];
+        let plot = chart(&zeros, 740.0, 170.0);
+        // Every point of both lines sits on the zero line (y = height - 20).
+        for token in plot.down.split(['M', 'L']).filter(|t| !t.trim().is_empty()) {
+            let y: f32 = token.split_whitespace().nth(1).unwrap().parse().unwrap();
+            assert!((y - 150.0).abs() < 0.01, "{token}");
+        }
+        assert_eq!(plot.peak, "0 KB/s");
+    }
+
+    #[test]
+    fn nested_group_shows_the_protocol_it_really_uses() {
+        let root = json!({"proxies": {
+            "🌍 出口": {"type": "Selector", "now": "🇺🇸 US"},
+            "🇺🇸 US": {"type": "Fallback", "now": "US-Hy2"},
+            "US-Hy2": {"type": "Hysteria2"}
+        }});
+        assert_eq!(leaf_kind(&root, "🇺🇸 US").as_deref(), Some("Hysteria2"));
+        assert_eq!(leaf_kind(&root, "US-Hy2").as_deref(), Some("Hysteria2"));
+        assert_eq!(leaf_kind(&root, "missing"), None);
+        assert_eq!(rule_hits(&json!({"extra": {"hitCount": 15}})), Some(15));
+        assert_eq!(rule_hits(&json!({"type": "Match"})), None);
     }
 }

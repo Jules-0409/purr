@@ -102,6 +102,7 @@ fn state() -> LiveState {
         kind: kind.into(),
         payload: payload.into(),
         policy: policy.into(),
+        hits: None,
         tone: if policy == "DIRECT" {
             1
         } else if policy == "REJECT" {
@@ -160,11 +161,25 @@ fn mutate(f: impl FnOnce(&mut LiveState)) {
     refresh_open();
 }
 pub fn run() -> Result<(), String> {
-    PREVIEW_MODE.with(|p| p.set(true));
     slint::BackendSelector::new()
         .renderer_name(renderer_name())
         .select()
         .map_err(|e| e.to_string())?;
+    {
+        let args: Vec<_> = std::env::args().collect();
+        let option = |name: &str| {
+            args.iter()
+                .position(|a| a == name)
+                .and_then(|i| args.get(i + 1))
+                .cloned()
+        };
+        if let Some(out) = option("--real-capture") {
+            // Real apply path: PREVIEW_MODE stays off, no fixture decoration.
+            let fixture = option("--fixture").map(std::path::PathBuf::from);
+            return super::real_capture::run(std::path::Path::new(&out), fixture.as_deref());
+        }
+    }
+    PREVIEW_MODE.with(|p| p.set(true));
     if let Some(i) = std::env::args().position(|a| a == "--disclaimer-capture") {
         let out = std::env::args()
             .nth(i + 1)
@@ -326,6 +341,9 @@ pub fn run() -> Result<(), String> {
     stop_motion();
     WINDOW.with(|slot| slot.borrow_mut().take());
     Ok(())
+}
+pub(super) fn capture(ui: &MainWindow, path: &std::path::Path) -> Result<(), String> {
+    capture_frame(ui, path)
 }
 fn capture_frame(ui: &MainWindow, path: &std::path::Path) -> Result<(), String> {
     let frame = ui.window().take_snapshot().map_err(|e| e.to_string())?;
@@ -842,6 +860,7 @@ pub fn decorate(ui: &MainWindow, s: &LiveState) {
     );
     ui.set_proxy_fraction((p / total) as f32);
     ui.set_proxy_detail(format!("{:.2} GB", p / 1024.0).into());
+    ui.global::<S>().set_route_known(true);
     ui.set_direct_detail(format!("{:.2} GB", d / 1024.0).into());
     ui.set_blocked_detail("1,284".into());
     ui.set_sub_name("橘猫机场".into());

@@ -20,6 +20,7 @@ pub mod disclaimer;
 mod fixture;
 mod popover;
 mod preview;
+mod real_capture;
 mod script;
 mod switch_check;
 pub use fixture::{driving as runtime_ui_driving, tick as verify_runtime_tick};
@@ -76,7 +77,6 @@ static AWAKE_AT: Mutex<Option<Instant>> = Mutex::new(None);
 struct RuleInput {
     rules: Arc<[Rule]>,
     query: String,
-    hits: HashMap<String, u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,7 +124,14 @@ pub struct LiveState {
     pub notice: String,
     pub notice_id: u64,
     pub telemetry: crate::telemetry::Telemetry,
-    pub last_nap: u64,
+    /// Length of the last nap; None until the cat has slept once this run.
+    pub last_nap: Option<u64>,
+    /// At least one /connections poll succeeded this run (today's totals are real from then on).
+    pub stats_live: bool,
+    /// The core log stream has connected (the blocked count is real from then on).
+    pub log_live: bool,
+    /// CPU of Purr + core (Task Manager scale); None until two samples.
+    pub cpu_pct: Option<f64>,
     pub sites: Vec<crate::probe::SiteProbe>,
     pub sites_at: Option<Instant>,
     pub sites_testing: bool,
@@ -168,7 +175,10 @@ impl Default for LiveState {
             notice: String::new(),
             notice_id: 0,
             telemetry: Default::default(),
-            last_nap: 0,
+            last_nap: None,
+            stats_live: false,
+            log_live: false,
+            cpu_pct: None,
             sites: Vec::new(),
             sites_at: None,
             sites_testing: false,
@@ -208,6 +218,7 @@ pub fn open() {
             }
         };
         ui.set_preview(PREVIEW_MODE.with(Cell::get));
+        ui.global::<S>().set_app_version(env!("CARGO_PKG_VERSION").into());
         ui.set_reduced_motion(crate::status::reduced_motion());
         ui.window().on_winit_window_event(|_, event| {
             if let winit::event::WindowEvent::DroppedFile(path) = event {
@@ -763,10 +774,9 @@ fn start_motion() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .subsec_nanos() as u64;
-    let mut last_plot = (Vec::<(u64, u64)>::new(), 0.0f32, 0.0f32, false);
+    let mut last_plot = (Vec::<(u64, u64)>::new(), 0.0f32, 0.0f32);
     let mut last_clock_ms = -1000.0f32;
     let mut last_wave_ms = -1000.0f32;
-    let mut last_chart_ms = -1000.0f32;
     let mut last_ear_x = -1.0f32;
     let mut last_awake = false;
     let mut last_hold = -1.0f32;
@@ -875,8 +885,8 @@ fn start_motion() {
                         .into(),
                     );
                 }
-                let load = (down as f32 / (16.0 * 1024.0 * 1024.0)).clamp(0.0, 1.0);
-                let next_amp = 1.5 + (down as f32 / (16.0 * 1048576.0)).clamp(0.0, 1.0) * 4.0;
+                let load = (down as f32 / (16.0 * present::MB as f32)).clamp(0.0, 1.0);
+                let next_amp = 1.5 + load * 4.0;
                 if (ui.global::<S>().get_amp() - next_amp).abs() > 0.02 {
                     ui.global::<S>().set_amp(next_amp);
                 }
@@ -886,8 +896,9 @@ fn start_motion() {
                     LIVE.with(|l| {
                         l.borrow()
                             .as_ref()
-                            .map(|s| present::format_hms(s.lock().unwrap().last_nap))
-                            .unwrap_or_default()
+                            .and_then(|s| s.lock().unwrap().last_nap)
+                            .map(present::format_hms)
+                            .unwrap_or_else(|| "—".into())
                     })
                 };
                 if ui.get_elapsed().as_str() != elapsed {
@@ -1012,19 +1023,11 @@ fn start_motion() {
                     }
                 }
 
-                let chart_phase =
-                    (awake && !reduced && ui.get_mode() != "direct").then_some(millis);
-                let chart_changed = chart_phase.is_some() != last_plot.3
-                    || history != last_plot.0
+                let chart_changed = history != last_plot.0
                     || ui.get_chart_w() != last_plot.1
                     || ui.get_chart_h() != last_plot.2;
-                if page == 0
-                    && (chart_changed
-                        || (chart_phase.is_some() && (millis - last_chart_ms) >= 200.0))
-                {
-                    last_chart_ms = millis;
-                    let plot =
-                        present::chart(&history, ui.get_chart_w(), ui.get_chart_h(), chart_phase);
+                if page == 0 && chart_changed {
+                    let plot = present::chart(&history, ui.get_chart_w(), ui.get_chart_h());
                     if ui.get_chart_fill().as_str() != plot.fill {
                         ui.set_chart_fill(plot.fill.into());
                     }
@@ -1041,7 +1044,7 @@ fn start_motion() {
                     if ui.get_peak_text().as_str() != peak_str {
                         ui.set_peak_text(peak_str.into());
                     }
-                    let max = history.iter().map(|(_, d)| *d).max().unwrap_or(0) as f64 / 1048576.0;
+                    let max = present::peak_down(&history).unwrap_or(0) as f64 / present::MB;
                     let max = (max / 5.0).ceil().max(1.0) * 5.0;
                     let max_str = format!("{max:.0}");
                     if ui.get_chart_max().as_str() != max_str {
@@ -1051,12 +1054,7 @@ fn start_motion() {
                     if ui.get_chart_mid().as_str() != mid_str {
                         ui.set_chart_mid(mid_str.into());
                     }
-                    last_plot = (
-                        history.clone(),
-                        ui.get_chart_w(),
-                        ui.get_chart_h(),
-                        chart_phase.is_some(),
-                    );
+                    last_plot = (history.clone(), ui.get_chart_w(), ui.get_chart_h());
                 }
             });
         },
@@ -1365,17 +1363,43 @@ fn apply(ui: &MainWindow, state: &LiveState) {
     ui.set_allow_lan(setting_value("allow-lan", state.preferences.allow_lan));
     ui.set_ipv6(setting_value("ipv6", state.preferences.ipv6));
     ui.set_busy(state.busy);
-    let total_memory = state.memory_shell + state.memory_core;
-    ui.set_memory_value(format!("{:.1}", total_memory as f64 / 1_000_000.0).into());
-    ui.set_memory_fraction((total_memory as f32 / 150_000_000.0).min(1.0));
+    // Decimal MB everywhere (present::MB); "—" until both processes were measured. No meter:
+    // there is no real limit to draw it against.
+    let known = |b: u64| (b > 0).then(|| format!("{:.0}", b as f64 / present::MB));
+    ui.set_memory_value(
+        if state.memory_shell > 0 && state.memory_core > 0 {
+            present::mb_text(state.memory_shell + state.memory_core)
+        } else {
+            "—".into()
+        }
+        .into(),
+    );
+    ui.set_memory_fraction(0.0);
     ui.set_memory_detail(
         format!(
             "主程序 {} · 内核 {} MB",
-            state.memory_shell / 1_000_000,
-            state.memory_core / 1_000_000
+            known(state.memory_shell).unwrap_or_else(|| "—".into()),
+            known(state.memory_core).unwrap_or_else(|| "—".into()),
         )
         .into(),
     );
+    ui.global::<S>().set_cpu_s(
+        state
+            .cpu_pct
+            .map(|c| format!("CPU {c:.1}%"))
+            .unwrap_or_default()
+            .into(),
+    );
+    let peak = |p: Option<u64>| {
+        format!(
+            "60 秒峰值 {}",
+            p.filter(|_| state.traffic_live)
+                .map(present::rate_text)
+                .unwrap_or_else(|| "—".into())
+        )
+    };
+    ui.set_down_peak(peak(present::peak_down(&state.history)).into());
+    ui.set_up_peak(peak(present::peak_up(&state.history)).into());
     if !PREVIEW_MODE.with(Cell::get) {
         let was_first = ui.get_first_run();
         ui.set_first_run(
@@ -1397,14 +1421,17 @@ fn apply(ui: &MainWindow, state: &LiveState) {
             });
         }
     }
+    // The active subscription's own name is set in apply_subscriptions; without one there is
+    // nothing to name.
     ui.set_sub_name(
         if state.preferences.subscription.is_some() {
-            "已导入订阅"
+            "—"
         } else {
-            "本地配置"
+            "未导入订阅"
         }
         .into(),
     );
+    ui.set_sub_detail("".into());
     ui.set_has_subscription(state.preferences.subscription.is_some());
     ui.set_total_value(
         state
@@ -1456,6 +1483,12 @@ fn apply(ui: &MainWindow, state: &LiveState) {
 
     let current = current_node(state);
     ui.set_current_group_name(current.group.as_str().into());
+    ui.global::<S>().set_group_label(
+        main_group(state)
+            .map(|g| g.label.as_str())
+            .unwrap_or("")
+            .into(),
+    );
     ui.set_current_node_label(current.label.as_str().into());
     ui.set_current_node_delay(current.delay.as_str().into());
 
@@ -1499,23 +1532,40 @@ fn apply(ui: &MainWindow, state: &LiveState) {
     if !PREVIEW_MODE.with(Cell::get) {
         apply_subscriptions(ui, state);
         apply_trouble(ui, state);
-        let total = present::size_text(state.telemetry.down.saturating_add(state.telemetry.up));
-        let (value, unit) = total.split_once(' ').unwrap_or(("0", "B"));
+        // Today's totals are real once one /connections poll succeeded this run; "—" before.
+        let size = |b: u64| {
+            if state.stats_live {
+                present::size_text(b)
+            } else {
+                "—".into()
+            }
+        };
+        let total = size(state.telemetry.down.saturating_add(state.telemetry.up));
+        let (value, unit) = total.split_once(' ').unwrap_or((total.as_str(), ""));
         ui.set_total_value(value.into());
         ui.set_total_unit(unit.into());
         ui.set_total_detail(
             format!(
                 "↓ {} · ↑ {}",
-                present::size_text(state.telemetry.down),
-                present::size_text(state.telemetry.up)
+                size(state.telemetry.down),
+                size(state.telemetry.up)
             )
             .into(),
         );
-        ui.set_proxy_detail(present::size_text(state.telemetry.routes[0]).into());
-        ui.set_direct_detail(present::size_text(state.telemetry.routes[1]).into());
-        ui.set_blocked_detail(state.telemetry.blocked.to_string().into());
+        ui.set_proxy_detail(size(state.telemetry.routes[0]).into());
+        ui.set_direct_detail(size(state.telemetry.routes[1]).into());
+        ui.set_blocked_detail(
+            if state.log_live {
+                state.telemetry.blocked.to_string()
+            } else {
+                "—".into()
+            }
+            .into(),
+        );
         let total = state.telemetry.routes.iter().sum::<u64>();
-        ui.set_proxy_fraction(if total > 0 {
+        ui.global::<S>()
+            .set_route_known(state.stats_live && total > 0);
+        ui.set_proxy_fraction(if state.stats_live && total > 0 {
             state.telemetry.routes[0] as f32 / total as f32
         } else {
             0.
@@ -1555,15 +1605,16 @@ fn apply_subscriptions(ui: &MainWindow, state: &LiveState) {
                 id: s.id.to_string().into(),
                 title: s.name.as_str().into(),
                 detail: format!("{} 个窝点 · {when}", s.nodes).into(),
+                // Decimal GB, as the provider prints its quota (same as macOS).
                 used: s
                     .used()
-                    // macOS shows whole GB (integer division in purr_core_snapshot_json).
-                    .map(|n| (n / 1073741824).to_string())
+                    .map(present::gb_text)
                     .unwrap_or_else(|| "—".into())
                     .into(),
                 total: s
                     .total
-                    .map(|n| (n / 1073741824).max(1).to_string())
+                    .filter(|t| *t > 0)
+                    .map(present::gb_text)
                     .unwrap_or_else(|| "—".into())
                     .into(),
                 fraction: s
@@ -1594,7 +1645,7 @@ fn apply_subscriptions(ui: &MainWindow, state: &LiveState) {
         let remaining = s
             .total
             .zip(s.used())
-            .map(|(t, u)| format!("剩 {}", present::size_text(t.saturating_sub(u))))
+            .map(|(t, u)| format!("剩 {} GB", present::gb_text(t.saturating_sub(u))))
             .unwrap_or_else(|| "额度未提供".into());
         let expires = s
             .expires
@@ -1685,21 +1736,29 @@ struct Current {
     delay: String,
 }
 
-/// The group the tray and the overview act on. Global mode: GLOBAL. Otherwise the top-level select
-/// group — one no other group contains, e.g. "🌍 出口" holding the fallback "🇺🇸 US" — then any
-/// select group, then the first group. mihomo lists groups alphabetically, so "first group" alone
-/// can land on an inner fallback such as "Ⓜ Meta".
+/// The group the tray and the overview act on (see `present::main_group`).
 fn main_group(state: &LiveState) -> Option<&crate::present::ProxyGroup> {
-    if state.mode == "global" {
-        return state.groups.iter().find(|g| g.name == "GLOBAL");
+    crate::present::main_group(&state.groups, &state.mode)
+}
+
+/// The protocol a member really connects with: a nested group (fallback "🇺🇸 US") is followed
+/// through its current member to a real node; "—" when that cannot be resolved.
+fn leaf_kind(state: &LiveState, name: &str) -> String {
+    let mut current = name.to_string();
+    for _ in 0..6 {
+        if let Some(g) = state.groups.iter().find(|g| g.name == current) {
+            current = g.now.clone();
+            continue;
+        }
+        return state
+            .groups
+            .iter()
+            .flat_map(|g| g.nodes.iter())
+            .find(|n| n.name == current)
+            .map(|n| n.kind.clone())
+            .unwrap_or_else(|| "—".into());
     }
-    let groups = || state.groups.iter().filter(|g| g.name != "GLOBAL");
-    let nested = |name: &str| groups().any(|g| g.nodes.iter().any(|n| n.name == name));
-    groups()
-        .find(|g| g.kind == "select" && !nested(&g.name))
-        .or_else(|| groups().find(|g| g.kind == "select"))
-        .or_else(|| groups().next())
-        .or(state.groups.first())
+    "—".into()
 }
 
 fn current_node(state: &LiveState) -> Current {
@@ -1979,11 +2038,9 @@ fn publish_conns(ui: &MainWindow, state: &LiveState) {
 fn publish_rules(ui: &MainWindow, state: &LiveState) {
     let query = RULE_QUERY.with(|query| query.borrow().clone());
     if RULE_INPUT.with(|s| {
-        s.borrow().as_ref().is_some_and(|last| {
-            Arc::ptr_eq(&last.rules, &state.rules)
-                && last.query == query
-                && last.hits == state.telemetry.hits
-        })
+        s.borrow()
+            .as_ref()
+            .is_some_and(|last| Arc::ptr_eq(&last.rules, &state.rules) && last.query == query)
     }) {
         return;
     }
@@ -2015,19 +2072,11 @@ fn publish_rules(ui: &MainWindow, state: &LiveState) {
             payload: rule.payload.as_str().into(),
             policy: rule.policy.as_str().into(),
             tone: rule.tone,
-            hits: state
-                .telemetry
+            // The core's own count since it started (`extra.hitCount`); "—" when not reported.
+            hits: rule
                 .hits
-                .iter()
-                .filter(|(key, _)| {
-                    let (kind, payload) = key.split_once(':').unwrap_or(("", ""));
-                    kind.replace('-', "")
-                        .eq_ignore_ascii_case(&rule.kind.replace('-', ""))
-                        && (payload == rule.payload || (rule.kind == "MATCH" && payload.is_empty()))
-                })
-                .map(|(_, n)| *n)
-                .sum::<u64>()
-                .to_string()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "—".into())
                 .into(),
         })
         .collect::<Vec<_>>();
@@ -2036,7 +2085,6 @@ fn publish_rules(ui: &MainWindow, state: &LiveState) {
         *s.borrow_mut() = Some(RuleInput {
             rules: Arc::clone(&state.rules),
             query,
-            hits: state.telemetry.hits.clone(),
         })
     });
 }
@@ -2090,7 +2138,7 @@ fn inspect_live(ui: &MainWindow, state: &LiveState, id: i32) {
         .unwrap_or(&[]);
     let values: Vec<_> = history.iter().flatten().copied().collect();
     ui.set_detail_name(node.label.as_str().into());
-    ui.set_detail_kind(format!("{} · {}", node.kind, group.label).into());
+    ui.set_detail_kind(format!("{} · {}", leaf_kind(state, &node.name), group.label).into());
     ui.set_detail_delay(delay_of(state, &node.name).trim_end_matches("ms").into());
     // 与 Mac 同源：探测成功率 = 本次运行最近 N 次测速里有回应的比例（N 为真实样本数）
     ui.global::<S>().set_nd_n(history.len() as i32);
@@ -2310,6 +2358,19 @@ pub fn count_reject(live: &Mutex<LiveState>) {
     guard.bump();
 }
 
+pub fn set_log_live(live: &Mutex<LiveState>) {
+    let mut guard = live.lock().expect("live lock");
+    if !guard.log_live {
+        guard.log_live = true;
+        guard.bump();
+    }
+}
+
+pub fn set_cpu(live: &Mutex<LiveState>, cpu: Option<f64>) {
+    let mut guard = live.lock().expect("live lock");
+    guard.cpu_pct = cpu;
+}
+
 pub fn set_traffic_live(live: &Mutex<LiveState>, on: bool) {
     let mut guard = live.lock().expect("live lock");
     if guard.traffic_live != on {
@@ -2334,10 +2395,7 @@ pub fn set_speed(live: &Mutex<LiveState>, up: u64, down: u64) {
         .unwrap_or(true);
     if tick {
         guard.last_sample = Some(now);
-        guard.history.push((up, down));
-        if guard.history.len() > 120 {
-            guard.history.remove(0);
-        }
+        present::push_history(&mut guard.history, (up, down));
     }
     guard.bump();
 }
@@ -2431,8 +2489,10 @@ pub fn set_awake(live: &Mutex<LiveState>, awake: bool) {
         }
     } else {
         if let Some(started) = *awake_at {
-            guard.last_nap = started.elapsed().as_secs();
+            guard.last_nap = Some(started.elapsed().as_secs());
         }
+        // The chart and "60 秒峰值" describe this session only.
+        guard.history.clear();
         *awake_at = None;
     }
     if guard.awake == awake {
@@ -2488,6 +2548,10 @@ pub fn set_connections(live: &Mutex<LiveState>, value: &serde_json::Value) {
         }
     }
     guard.route_down = route_down;
+    if !guard.stats_live {
+        guard.stats_live = true;
+        guard.bump();
+    }
     if guard.connections == connections
         && guard.session_down == totals.down
         && guard.session_up == totals.up

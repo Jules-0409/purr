@@ -36,6 +36,7 @@ static CTX: OnceLock<Arc<RuntimeCtx>> = OnceLock::new();
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct FfiNode {
     pub name: String,
+    /// The protocol it really connects with; for a nested group, the protocol of its current node.
     pub proto: String,
     pub ms: u32,
 }
@@ -54,9 +55,11 @@ pub struct FfiSub {
     pub name: String,
     pub url: String,
     pub desc: String,
-    /// Whole GB from the subscription-userinfo header; null when the provider does not send it.
-    pub used: Option<u64>,
-    pub total: Option<u64>,
+    /// Decimal GB (10^9 B, as providers print quotas) from the subscription-userinfo header;
+    /// null when the provider does not send it.
+    pub used: Option<f64>,
+    pub total: Option<f64>,
+    /// Expiry date on the local clock, or "未提供".
     pub exp: String,
     pub days_left: Option<i64>,
     pub active: bool,
@@ -73,7 +76,10 @@ pub struct FfiConn {
     pub chain: String,
     pub dn_kb: f64,
     pub up_kb: f64,
-    pub age_s: u64,
+    /// Seconds since the connection started; null when its start time did not parse.
+    pub age_s: Option<u64>,
+    /// Same text as the Windows connections page ("2m05s", "—").
+    pub age: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -81,6 +87,8 @@ pub struct FfiRule {
     pub kind: String,
     pub match_str: String,
     pub policy: String,
+    /// The core's match count since it started (`extra.hitCount`); null when not reported.
+    pub hits: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -90,16 +98,36 @@ pub struct FfiSnapshot {
     pub first_run: bool,
     pub mode: String,
     pub tun: bool,
+    /// Decimal MB/s.
     pub dn_mb_s: f64,
     pub up_mb_s: f64,
-    pub proxy_mb: f64,
-    pub direct_mb: f64,
-    pub blocked_count: u64,
-    pub mem_mb: f64,
+    /// Today's traffic on the local calendar day (persisted in statistics.json, same counting as
+    /// Windows); null until the first successful /connections poll of this run.
+    pub today_down: Option<String>,
+    pub today_up: Option<String>,
+    pub today_total: Option<String>,
+    pub route_proxy: Option<String>,
+    pub route_direct: Option<String>,
+    /// Proxy share of today's routed bytes (0–1); null when nothing was routed yet.
+    pub route_proxy_fraction: Option<f64>,
+    /// Rule-rejected TCP connections today; null until the log stream has connected.
+    pub blocked_count: Option<u64>,
+    /// Decimal MB; null until both processes were measured.
+    pub mem_mb: Option<f64>,
+    pub mem_shell_mb: Option<f64>,
+    pub mem_core_mb: Option<f64>,
+    /// CPU of Purr + core (100 % = one core, like Activity Monitor); null until two samples.
+    pub cpu_pct: Option<f64>,
     pub exit_ip: String,
     pub exit_loc: String,
+    /// "pending" (looking up), "ok", "failed".
+    pub exit_state: String,
     pub direct_ip: String,
     pub direct_loc: String,
+    pub direct_state: String,
+    /// "", "timeout", "offline", "sub" — same detection as the Windows health loop.
+    pub trouble: String,
+    pub version: String,
     pub groups: Vec<FfiGroup>,
     pub subscriptions: Vec<FfiSub>,
     pub connections: Vec<FfiConn>,
@@ -115,16 +143,23 @@ struct FfiState {
     last_dn_total: Option<u64>,
     last_up_total: Option<u64>,
     last_rate_at: Option<Instant>,
-    proxy_bytes: u64,
-    direct_bytes: u64,
-    seen_conn_bytes: HashMap<String, (u64, u64)>,
-    blocked_count: u64,
-    mem_mb: f64,
+    telemetry: crate::telemetry::Telemetry,
+    stats_ready: bool,
+    log_ready: bool,
+    mem_shell: Option<u64>,
+    mem_core: Option<u64>,
+    cpu_pct: Option<f64>,
+    cpu: crate::status::CpuMeter,
     exit_ip: String,
     exit_loc: String,
+    exit_state: String,
     direct_ip: String,
     direct_loc: String,
+    direct_state: String,
+    trouble: String,
     groups: Vec<FfiGroup>,
+    /// The core's groups as parsed, for picking the main group and health checks.
+    raw_groups: Vec<crate::present::ProxyGroup>,
     /// 显示名（去掉 emoji）→ mihomo 里的真实名字，切换节点时要用真实名字
     raw_names: HashMap<String, String>,
     delays: HashMap<String, u32>,
@@ -144,16 +179,22 @@ impl Default for FfiState {
             last_dn_total: None,
             last_up_total: None,
             last_rate_at: None,
-            proxy_bytes: 0,
-            direct_bytes: 0,
-            seen_conn_bytes: HashMap::new(),
-            blocked_count: 0,
-            mem_mb: 0.0, // 0 = not measured yet; the UI shows "—"
+            telemetry: Default::default(),
+            stats_ready: false,
+            log_ready: false,
+            mem_shell: None,
+            mem_core: None,
+            cpu_pct: None,
+            cpu: Default::default(),
             exit_ip: "—".into(),
-            exit_loc: "直连未经过窝点".into(),
-            direct_ip: "检测中…".into(),
-            direct_loc: "本地宽带直连出口".into(),
+            exit_loc: String::new(),
+            exit_state: "pending".into(),
+            direct_ip: "—".into(),
+            direct_loc: String::new(),
+            direct_state: "pending".into(),
+            trouble: String::new(),
             groups: Vec::new(),
+            raw_groups: Vec::new(),
             raw_names: HashMap::new(),
             delays: HashMap::new(),
             connections: Vec::new(),
@@ -282,6 +323,7 @@ pub extern "C" fn purr_core_init() -> c_int {
 
     let state = Arc::new(Mutex::new(FfiState {
         preferences: prefs.clone(),
+        telemetry: crate::telemetry::Telemetry::load(&settings.config_dir),
         ..FfiState::default()
     }));
 
@@ -332,55 +374,214 @@ async fn background_loop(api: Api, state: Arc<Mutex<FfiState>>, initial_awake: b
             let _ = crate::proxy::enable();
         }
     }
-    tokio::spawn({
-        let state = Arc::clone(&state);
-        async move {
-            if let Some((ip, loc)) = lookup_direct_place().await {
-                if let Ok(mut g) = state.lock() {
-                    g.direct_ip = ip;
-                    g.direct_loc = loc;
-                }
-            }
-        }
-    });
-
+    tokio::spawn(direct_place_loop(Arc::clone(&state)));
     tokio::spawn(reject_log_loop(api.clone(), Arc::clone(&state)));
 
     let mut last_place_check = Instant::now() - Duration::from_secs(60);
+    let mut last_save = Instant::now();
+    let mut last_debug = Instant::now() - Duration::from_secs(60);
+    let mut health = Health::default();
     let mut tick_count = 0u64;
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     loop {
         ticker.tick().await;
         tick_count = tick_count.wrapping_add(1);
         refresh_from_mihomo(&api, &state, tick_count).await;
+        health_tick(&api, &state, &mut health).await;
 
         let awake = IS_AWAKE.load(Ordering::Relaxed);
         let need_place = NEED_PLACE_REFRESH.swap(false, Ordering::Relaxed);
+        if need_place {
+            // The node, mode or subscription changed: the old exit IP is no longer true.
+            if let Ok(mut g) = state.lock() {
+                g.exit_ip = "—".into();
+                g.exit_loc = String::new();
+                g.exit_state = "pending".into();
+            }
+        }
         if awake && (need_place || last_place_check.elapsed() >= Duration::from_secs(20)) {
             last_place_check = Instant::now();
             let state_place = Arc::clone(&state);
             tokio::spawn(async move {
                 let place = crate::status::lookup_place().await;
-                if place != "暂时不知道" {
+                let Ok(mut g) = state_place.lock() else {
+                    return;
+                };
+                if place == "暂时不知道" {
+                    g.exit_ip = "—".into();
+                    g.exit_loc = String::new();
+                    g.exit_state = "failed".into();
+                } else {
                     let (ip, loc) = match place.split_once(" · ") {
                         Some((i, l)) => (i.trim().to_string(), l.trim().to_string()),
-                        None => (place, "代理出口".to_string()),
+                        None => (place, String::new()),
                     };
-                    if let Ok(mut g) = state_place.lock() {
-                        g.exit_ip = ip;
-                        g.exit_loc = loc;
-                    }
+                    g.exit_ip = ip;
+                    g.exit_loc = loc;
+                    g.exit_state = "ok".into();
                 }
             });
+        }
+        if last_save.elapsed() >= Duration::from_secs(60) {
+            last_save = Instant::now();
+            save_telemetry(&state);
+        }
+        if last_debug.elapsed() >= Duration::from_secs(10) {
+            last_debug = Instant::now();
+            write_debug_values(&state);
         }
     }
 }
 
-/// Counts rule-rejected connections (the 抓老鼠 number) from the core's info log.
+fn save_telemetry(state: &Arc<Mutex<FfiState>>) {
+    let Ok(dir) = crate::config::app_config_dir() else {
+        return;
+    };
+    if let Ok(mut g) = state.lock() {
+        g.telemetry.roll(crate::subscriptions::now());
+        if let Err(e) = g.telemetry.save(&dir) {
+            eprintln!("purr: statistics not saved: {e}");
+        }
+    }
+}
+
+/// Off by default. When `debug-values` exists in the config dir, every 10 s the values the UI is
+/// given are written to `debug-snapshot.json` and one summary line is appended to
+/// `debug-values.log`, so they can be compared with the core API and `ps`.
+fn write_debug_values(_state: &Arc<Mutex<FfiState>>) {
+    let Ok(dir) = crate::config::app_config_dir() else {
+        return;
+    };
+    if !dir.join("debug-values").exists() {
+        return;
+    }
+    let json = snapshot_string();
+    let _ = std::fs::write(dir.join("debug-snapshot.json"), &json);
+    let Ok(v) = serde_json::from_str::<Value>(&json) else {
+        return;
+    };
+    let line = serde_json::json!({
+        "t": crate::subscriptions::now(),
+        "conns": v["connections"].as_array().map(Vec::len),
+        "dn_mb_s": v["dn_mb_s"], "up_mb_s": v["up_mb_s"],
+        "today": v["today_total"], "down": v["today_down"], "up": v["today_up"],
+        "blocked": v["blocked_count"], "mem_mb": v["mem_mb"],
+        "mem_shell_mb": v["mem_shell_mb"], "mem_core_mb": v["mem_core_mb"],
+        "cpu_pct": v["cpu_pct"], "exit": v["exit_ip"], "exit_state": v["exit_state"],
+        "direct": v["direct_ip"], "trouble": v["trouble"],
+        "ages": v["connections"].as_array().map(|a| a.iter().take(5).map(|c| c["age_s"].clone()).collect::<Vec<_>>()),
+        "hits": v["rules"].as_array().map(|a| a.iter().filter(|r| r["hits"].as_u64().unwrap_or(0) > 0).map(|r| format!("{}:{}={}", r["kind"].as_str().unwrap_or(""), r["match_str"].as_str().unwrap_or(""), r["hits"])).collect::<Vec<_>>()),
+    });
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("debug-values.log"))
+    {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+#[derive(Default)]
+struct Health {
+    failed: u8,
+    previous: String,
+    last_probe: Option<Instant>,
+}
+
+/// Same rules as the Windows `health_loop`: an exhausted active subscription is "sub"; awake with
+/// no routable address is "offline"; three failed delay probes (20 s apart) of the main group's
+/// current member is "timeout". The fixture marker used by the validation suite turns off the
+/// offline check, as on Windows.
+async fn health_tick(api: &Api, state: &Arc<Mutex<FfiState>>, h: &mut Health) {
+    let awake = IS_AWAKE.load(Ordering::Relaxed);
+    let fixture =
+        crate::config::app_config_dir().is_ok_and(|d| d.join("purr-validation-fixture").exists());
+    let target = {
+        let Ok(mut g) = state.lock() else {
+            return;
+        };
+        let exhausted = g
+            .preferences
+            .subscriptions
+            .iter()
+            .find(|sub| Some(&sub.url) == g.preferences.subscription.as_ref())
+            .is_some_and(|sub| sub.exhausted());
+        if exhausted {
+            g.trouble = "sub".into();
+        } else if g.trouble == "sub" {
+            g.trouble.clear();
+        }
+        if !awake {
+            if g.trouble == "offline" || g.trouble == "timeout" {
+                g.trouble.clear();
+            }
+        } else if !fixture {
+            let online = crate::status::network_available();
+            if !online && (g.trouble.is_empty() || g.trouble == "offline") {
+                g.trouble = "offline".into();
+            } else if online && g.trouble == "offline" {
+                g.trouble.clear();
+            }
+        }
+        if !awake
+            || g.mode == "direct"
+            || !g.ready
+            || (!g.trouble.is_empty() && g.trouble != "timeout")
+        {
+            None
+        } else {
+            crate::present::main_group(&g.raw_groups, &g.mode).and_then(|grp| {
+                let member = grp.nodes.iter().find(|n| n.name == grp.now)?;
+                crate::present::probe_delay(&member.kind).then(|| grp.now.clone())
+            })
+        }
+    };
+    let Some(now) = target else {
+        h.failed = 0;
+        return;
+    };
+    if now != h.previous {
+        h.failed = 0;
+        h.previous = now.clone();
+    }
+    if h.last_probe
+        .is_some_and(|t| t.elapsed() < Duration::from_secs(20))
+    {
+        return;
+    }
+    h.last_probe = Some(Instant::now());
+    match api.delay(&now).await {
+        Ok(ms) => {
+            h.failed = 0;
+            if let Ok(mut g) = state.lock() {
+                g.delays.insert(now.clone(), ms);
+                if g.trouble == "timeout" {
+                    g.trouble.clear();
+                }
+            }
+        }
+        Err(_) => {
+            h.failed = h.failed.saturating_add(1);
+            if h.failed >= 3 {
+                h.failed = 0;
+                if let Ok(mut g) = state.lock() {
+                    g.trouble = "timeout".into();
+                }
+            }
+        }
+    }
+}
+
+/// Counts rule-rejected connections (the 抓老鼠 number) from the core's info log into today's
+/// statistics. Until the stream has connected once the count is unknown ("—").
 async fn reject_log_loop(api: Api, state: Arc<Mutex<FfiState>>) {
     use tokio_tungstenite::tungstenite::Message;
     loop {
         if let Ok(mut socket) = api.websocket("/logs?level=info").await {
+            if let Ok(mut g) = state.lock() {
+                g.log_ready = true;
+            }
             while let Some(Ok(message)) = socket.next().await {
                 let text = match message {
                     Message::Text(t) => t.to_string(),
@@ -393,12 +594,44 @@ async fn reject_log_loop(api: Api, state: Arc<Mutex<FfiState>>) {
                 let payload = value.get("payload").and_then(Value::as_str).unwrap_or("");
                 if crate::present::is_reject_log(payload) {
                     if let Ok(mut g) = state.lock() {
-                        g.blocked_count = g.blocked_count.saturating_add(1);
+                        g.telemetry.reject(crate::subscriptions::now());
                     }
                 }
             }
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+/// The local (direct) exit: looked up at start, retried with backoff (5 s doubling to 5 min) while
+/// it fails, re-checked every 10 min once known. Shows "—" after a failure, never a stale guess.
+async fn direct_place_loop(state: Arc<Mutex<FfiState>>) {
+    let mut backoff = Duration::from_secs(5);
+    loop {
+        let found = lookup_direct_place().await;
+        let wait = {
+            let Ok(mut g) = state.lock() else {
+                return;
+            };
+            match found {
+                Some((ip, loc)) => {
+                    g.direct_ip = ip;
+                    g.direct_loc = loc;
+                    g.direct_state = "ok".into();
+                    backoff = Duration::from_secs(5);
+                    Duration::from_secs(600)
+                }
+                None => {
+                    g.direct_ip = "—".into();
+                    g.direct_loc = String::new();
+                    g.direct_state = "failed".into();
+                    let w = backoff;
+                    backoff = (backoff * 2).min(Duration::from_secs(300));
+                    w
+                }
+            }
+        };
+        tokio::time::sleep(wait).await;
     }
 }
 
@@ -434,18 +667,26 @@ async fn lookup_direct_place() -> Option<(String, String)> {
 }
 
 async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count: u64) {
-    let shell_bytes = crate::status::footprint_bytes(std::process::id()).unwrap_or(0);
-    let core_bytes = crate::status::footprint_bytes(crate::core::running_pid()).unwrap_or(0);
-    let total_mem_mb = ((shell_bytes + core_bytes) as f64) / (1024.0 * 1024.0);
+    // Memory and CPU every 3 s: a root (TUN) core can only be read through `ps`, and spawning it
+    // every second would show up in Purr's own CPU.
+    if tick_count % 3 == 1 {
+        let shell_pid = std::process::id();
+        let core_pid = crate::core::running_pid();
+        let shell = crate::status::process_sample(shell_pid);
+        let core = crate::status::process_sample(core_pid);
+        if let Ok(mut g) = state.lock() {
+            g.mem_shell = shell.memory;
+            g.mem_core = core.memory;
+            let total = shell.cpu.zip(core.cpu).map(|(a, b)| a + b);
+            g.cpu_pct = g.cpu.update(&[shell_pid, core_pid], total);
+        }
+    }
 
     let mode = match api.mode().await {
         Ok(m) => m,
         Err(_) => {
             if let Ok(mut g) = state.lock() {
                 g.ready = false;
-                if total_mem_mb > 1.0 {
-                    g.mem_mb = total_mem_mb;
-                }
             }
             return;
         }
@@ -469,20 +710,21 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
     };
     g.ready = true;
     g.mode = mode;
-    if total_mem_mb > 1.0 {
-        g.mem_mb = total_mem_mb;
-    }
 
     if let Some(ref pjson) = proxies_json {
         let mut parsed = crate::present::proxy_groups(pjson);
+        g.raw_groups = parsed.clone();
         // 手选的 select 组排最前（托盘/概览默认操作第一组），fallback/url-test 等自动组靠后，GLOBAL 仍在最后
+        let main = crate::present::main_group(&parsed, &g.mode).map(|m| m.name.clone());
         parsed.sort_by_key(|pg| {
-            if pg.name == "GLOBAL" {
-                2
-            } else if pg.kind == "select" {
+            if Some(&pg.name) == main.as_ref() {
                 0
-            } else {
+            } else if pg.name == "GLOBAL" {
+                3
+            } else if pg.kind == "select" {
                 1
+            } else {
+                2
             }
         });
         let mut next_groups = Vec::new();
@@ -504,11 +746,8 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
                     let cached_ms = g.delays.get(&n.name).copied().or(n.delay_ms).unwrap_or(0); // 0 = 未测出，界面显示「—」
                     FfiNode {
                         name: n.label.clone(),
-                        proto: if n.kind.is_empty() {
-                            "Proxy".into()
-                        } else {
-                            n.kind.clone()
-                        },
+                        proto: crate::present::leaf_kind(pjson, &n.name)
+                            .unwrap_or_else(|| n.kind.clone()),
                         ms: cached_ms,
                     }
                 })
@@ -521,9 +760,7 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
                 nodes,
             });
         }
-        if !next_groups.is_empty() {
-            g.groups = next_groups;
-        }
+        g.groups = next_groups;
     }
 
     if let Some(ref cjson) = conns_json {
@@ -539,16 +776,15 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
             (g.last_dn_total, g.last_up_total, g.last_rate_at)
         {
             let dt = now_inst.duration_since(prev_at).as_secs_f64().max(0.2);
-            let d_dn = dn_tot.saturating_sub(prev_dn) as f64 / (1024.0 * 1024.0) / dt;
-            let d_up = up_tot.saturating_sub(prev_up) as f64 / (1024.0 * 1024.0) / dt;
-            g.dn_mb_s = d_dn;
-            g.up_mb_s = d_up;
+            g.dn_mb_s = dn_tot.saturating_sub(prev_dn) as f64 / crate::present::MB / dt;
+            g.up_mb_s = up_tot.saturating_sub(prev_up) as f64 / crate::present::MB / dt;
         }
         g.last_dn_total = Some(dn_tot);
         g.last_up_total = Some(up_tot);
         g.last_rate_at = Some(now_inst);
+        g.telemetry.connections(cjson, crate::subscriptions::now());
+        g.stats_ready = true;
 
-        let mut active_ids = std::collections::HashSet::new();
         let mut next_conns = Vec::new();
         if let Some(arr) = cjson.get("connections").and_then(Value::as_array) {
             for item in arr {
@@ -560,7 +796,6 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
                 if id.is_empty() {
                     continue;
                 }
-                active_ids.insert(id.clone());
                 let down = item.get("download").and_then(Value::as_u64).unwrap_or(0);
                 let up = item.get("upload").and_then(Value::as_u64).unwrap_or(0);
                 let chains: Vec<String> = item
@@ -577,20 +812,8 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
                 let last_chain = chains.last().cloned().unwrap_or_else(|| "DIRECT".into());
                 let is_direct = first_chain.eq_ignore_ascii_case("DIRECT")
                     || last_chain.eq_ignore_ascii_case("DIRECT");
-                let is_reject = first_chain.eq_ignore_ascii_case("REJECT")
-                    || last_chain.eq_ignore_ascii_case("REJECT");
-
-                let prev = g.seen_conn_bytes.insert(id.clone(), (down, up));
-                // Rejected connections never reach /connections; they are counted from the log stream.
-                let delta = match prev {
-                    Some((pd, pu)) => down.saturating_sub(pd) + up.saturating_sub(pu),
-                    None => down + up,
-                };
-                if is_direct {
-                    g.direct_bytes = g.direct_bytes.saturating_add(delta);
-                } else if !is_reject {
-                    g.proxy_bytes = g.proxy_bytes.saturating_add(delta);
-                }
+                let is_reject = first_chain.to_ascii_uppercase().starts_with("REJECT")
+                    || last_chain.to_ascii_uppercase().starts_with("REJECT");
 
                 let meta = item.get("metadata");
                 let host = meta
@@ -614,7 +837,7 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
                     })
                     .unwrap_or("—")
                     .to_string();
-                let rule_type = item.get("rule").and_then(Value::as_str).unwrap_or("MATCH");
+                let rule_type = item.get("rule").and_then(Value::as_str).unwrap_or("—");
                 let rule_payload = item
                     .get("rulePayload")
                     .and_then(Value::as_str)
@@ -639,7 +862,6 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
                     first_chain
                 };
                 let start_str = item.get("start").and_then(Value::as_str).unwrap_or("");
-                let age_s = parse_conn_age_secs(start_str, now_sys);
                 next_conns.push(FfiConn {
                     id,
                     app,
@@ -647,13 +869,13 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
                     rule,
                     pol,
                     chain: chain_display,
-                    dn_kb: (down as f64) / 1024.0,
-                    up_kb: (up as f64) / 1024.0,
-                    age_s,
+                    dn_kb: down as f64 / crate::present::KB,
+                    up_kb: up as f64 / crate::present::KB,
+                    age_s: crate::present::age_secs(start_str, now_sys),
+                    age: crate::present::age_text(start_str, now_sys),
                 });
             }
         }
-        g.seen_conn_bytes.retain(|k, _| active_ids.contains(k));
         next_conns.sort_by(|a, b| {
             b.dn_kb
                 .partial_cmp(&a.dn_kb)
@@ -671,7 +893,7 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
                     kind: r
                         .get("type")
                         .and_then(Value::as_str)
-                        .unwrap_or("MATCH")
+                        .unwrap_or("—")
                         .to_uppercase(),
                     match_str: r
                         .get("payload")
@@ -680,42 +902,136 @@ async fn refresh_from_mihomo(api: &Api, state: &Arc<Mutex<FfiState>>, tick_count
                         .unwrap_or("*")
                         .to_string(),
                     policy: crate::present::display_name(
-                        r.get("proxy").and_then(Value::as_str).unwrap_or("DIRECT"),
+                        r.get("proxy").and_then(Value::as_str).unwrap_or("—"),
                     ),
+                    hits: crate::present::rule_hits(r),
                 })
                 .collect();
         }
     }
 }
 
-fn parse_conn_age_secs(start: &str, now: SystemTime) -> u64 {
-    if start.len() < 19 {
-        return 1;
+/// Picks the fastest other member of the main select group (real delay tests) and switches to it;
+/// the Windows `select_available`. Returns the new member's display name.
+async fn swap_to_best(ctx: &Arc<RuntimeCtx>) -> Result<String, String> {
+    let (group, now, names) = {
+        let g = ctx.state.lock().map_err(|_| "状态锁不可用")?;
+        let grp = crate::present::main_group(&g.raw_groups, &g.mode)
+            .filter(|grp| grp.kind == "select")
+            .or_else(|| g.raw_groups.iter().find(|grp| grp.kind == "select"))
+            .ok_or("没有可切换的节点组")?;
+        let names: Vec<String> = grp
+            .nodes
+            .iter()
+            .filter(|n| n.name != grp.now && crate::present::probe_delay(&n.kind))
+            .map(|n| n.name.clone())
+            .collect();
+        (grp.name.clone(), grp.now.clone(), names)
+    };
+    let mut probes = stream::iter(names.into_iter().map(|name| {
+        let api = ctx.api.clone();
+        async move {
+            let d = api.delay(&name).await.ok();
+            (name, d)
+        }
+    }))
+    .buffer_unordered(4);
+    let mut best: Option<(String, u32)> = None;
+    while let Some((name, d)) = probes.next().await {
+        if let Some(ms) = d {
+            if let Ok(mut g) = ctx.state.lock() {
+                g.delays.insert(name.clone(), ms);
+            }
+            if best.as_ref().is_none_or(|(_, b)| ms < *b) {
+                best = Some((name, ms));
+            }
+        }
     }
-    let year: i32 = start[0..4].parse().ok().unwrap_or(1970);
-    let month: u32 = start[5..7].parse().ok().unwrap_or(1);
-    let day: u32 = start[8..10].parse().ok().unwrap_or(1);
-    let hour: u32 = start[11..13].parse().ok().unwrap_or(0);
-    let minute: u32 = start[14..16].parse().ok().unwrap_or(0);
-    let second: u32 = start[17..19].parse().ok().unwrap_or(0);
-    let mut y = year;
-    if month <= 2 {
-        y -= 1;
+    let (name, _) = best.ok_or("这个组暂时没有可用的窝点，请更新订阅或重试")?;
+    let unchanged = ctx
+        .state
+        .lock()
+        .map(|g| {
+            g.raw_groups
+                .iter()
+                .any(|grp| grp.name == group && grp.now == now)
+        })
+        .unwrap_or(false);
+    if !unchanged {
+        return Err("节点已由其他操作切换".into());
     }
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = (y - era * 400) as u64;
-    let doy = (153 * (month as i32 + if month > 2 { -3 } else { 9 }) + 2) / 5 + day as i32 - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy as u64;
-    let days = i64::from(era) * 146097 + doe as i64 - 719468;
-    let unix = days * 86400 + i64::from(hour) * 3600 + i64::from(minute) * 60 + i64::from(second);
-    if unix <= 0 {
-        return 1;
+    ctx.api.select(&group, &name).await?;
+    if let Ok(mut g) = ctx.state.lock() {
+        g.trouble.clear();
     }
-    let now_secs = now
-        .duration_since(SystemTime::UNIX_EPOCH)
+    NEED_PLACE_REFRESH.store(true, Ordering::Relaxed);
+    Ok(crate::present::display_name(&name))
+}
+
+/// Acts on the current trouble for real: "swap" switches to the fastest working member,
+/// "retry" re-checks (a delay probe of the current member, or the network) and only clears the
+/// trouble when that check passes. Returns `{"ok":bool,"message":...}`.
+#[no_mangle]
+pub extern "C" fn purr_core_fix_trouble_json(action: *const c_char) -> *mut c_char {
+    let action = if action.is_null() {
+        String::new()
+    } else {
+        unsafe { CStr::from_ptr(action) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    let out = match CTX.get().cloned() {
+        None => Err("内核未就绪".to_string()),
+        Some(ctx) => {
+            let trouble = ctx
+                .state
+                .lock()
+                .map(|g| g.trouble.clone())
+                .unwrap_or_default();
+            let handle = ctx.handle.clone();
+            handle.block_on(async {
+                match (action.as_str(), trouble.as_str()) {
+                    ("swap", _) => swap_to_best(&ctx).await.map(|n| format!("已换到 {n}")),
+                    (_, "offline") => {
+                        if crate::status::network_available() {
+                            if let Ok(mut g) = ctx.state.lock() {
+                                g.trouble.clear();
+                            }
+                            Ok("网络回来了 · 继续呼噜".to_string())
+                        } else {
+                            Err("网络还没有恢复，请先连接 Wi-Fi 或有线网络".to_string())
+                        }
+                    }
+                    _ => {
+                        let now = ctx.state.lock().ok().and_then(|g| {
+                            crate::present::main_group(&g.raw_groups, &g.mode)
+                                .map(|grp| grp.now.clone())
+                        });
+                        let now = now.ok_or("没有可测速的窝点".to_string())?;
+                        let ms = ctx
+                            .api
+                            .delay(&now)
+                            .await
+                            .map_err(|_| "它还没有回应，可以换一个窝点".to_string())?;
+                        if let Ok(mut g) = ctx.state.lock() {
+                            g.delays.insert(now, ms);
+                            if g.trouble == "timeout" {
+                                g.trouble.clear();
+                            }
+                        }
+                        Ok(format!("它回应了 · {ms}ms · 继续呼噜"))
+                    }
+                }
+            })
+        }
+    };
+    let json = match out {
+        Ok(m) => serde_json::json!({"ok": true, "message": m}),
+        Err(e) => serde_json::json!({"ok": false, "message": e}),
+    };
+    CString::new(json.to_string())
         .unwrap_or_default()
-        .as_secs();
-    now_secs.saturating_sub(unix as u64).max(1)
+        .into_raw()
 }
 
 #[no_mangle]
@@ -761,6 +1077,9 @@ pub extern "C" fn purr_core_set_awake(awake: bool) {
                 g.dn_mb_s = 0.0;
                 g.up_mb_s = 0.0;
                 g.connections.clear();
+                g.exit_ip = "—".into();
+                g.exit_loc = String::new();
+                g.exit_state = "pending".into();
             }
         }
     });
@@ -1224,12 +1543,23 @@ pub extern "C" fn purr_core_close_connection(id: *const c_char) -> c_int {
 
 #[no_mangle]
 pub extern "C" fn purr_core_snapshot_json() -> *mut c_char {
+    CString::new(snapshot_string())
+        .unwrap_or_default()
+        .into_raw()
+}
+
+fn snapshot_string() -> String {
     let Some(ctx) = CTX.get() else {
-        return CString::new("{}").unwrap_or_default().into_raw();
+        return "{}".into();
     };
     let Ok(g) = ctx.state.lock() else {
-        return CString::new("{}").unwrap_or_default().into_raw();
+        return "{}".into();
     };
+    snapshot_of(&g).unwrap_or_else(|| "{}".into())
+}
+
+fn snapshot_of(g: &FfiState) -> Option<String> {
+    use crate::present::{size_text, GB, MB};
     let now_epoch = crate::subscriptions::now();
     let active_url = g.preferences.subscription.as_deref();
     let subs: Vec<FfiSub> = g
@@ -1237,18 +1567,15 @@ pub extern "C" fn purr_core_snapshot_json() -> *mut c_char {
         .subscriptions
         .iter()
         .map(|s| {
-            let used_gb = s.used().map(|u| u / (1024 * 1024 * 1024));
-            let total_gb = s
-                .total
-                .filter(|t| *t > 0)
-                .map(|t| (t / (1024 * 1024 * 1024)).max(1));
             let expires = s.expires.filter(|t| *t > 0);
             let exp = expires
                 .map(crate::subscriptions::date)
                 .unwrap_or_else(|| "未提供".into());
             let days_left = expires.map(|t| (t as i64 - now_epoch as i64).div_euclid(86400));
             let mins = now_epoch.saturating_sub(s.updated) / 60;
-            let ago = if mins == 0 {
+            let ago = if s.updated == 0 {
+                "尚未更新".to_string()
+            } else if mins == 0 {
                 "刚刚更新".to_string()
             } else if mins < 60 {
                 format!("更新于 {mins} 分钟前")
@@ -1262,8 +1589,8 @@ pub extern "C" fn purr_core_snapshot_json() -> *mut c_char {
                 name: s.name.clone(),
                 url: s.url.clone(),
                 desc: format!("{} 个窝点 · {ago}", s.nodes),
-                used: used_gb,
-                total: total_gb,
+                used: s.used().map(|u| u as f64 / GB),
+                total: s.total.filter(|t| *t > 0).map(|t| t as f64 / GB),
                 exp,
                 days_left,
                 active: active_url == Some(s.url.as_str()),
@@ -1272,6 +1599,10 @@ pub extern "C" fn purr_core_snapshot_json() -> *mut c_char {
         })
         .collect();
 
+    let t = &g.telemetry;
+    let ready_text = |bytes: u64| g.stats_ready.then(|| size_text(bytes));
+    let routed = t.routes[0].saturating_add(t.routes[1]);
+    let mb = |b: Option<u64>| b.map(|b| b as f64 / MB);
     let first_run = subs.is_empty() && g.groups.is_empty();
     let snap = FfiSnapshot {
         ready: g.ready,
@@ -1281,32 +1612,41 @@ pub extern "C" fn purr_core_snapshot_json() -> *mut c_char {
         tun: g.tun,
         dn_mb_s: g.dn_mb_s,
         up_mb_s: g.up_mb_s,
-        proxy_mb: (g.proxy_bytes as f64) / (1024.0 * 1024.0),
-        direct_mb: (g.direct_bytes as f64) / (1024.0 * 1024.0),
-        blocked_count: g.blocked_count,
-        mem_mb: g.mem_mb,
+        today_down: ready_text(t.down),
+        today_up: ready_text(t.up),
+        today_total: ready_text(t.down.saturating_add(t.up)),
+        route_proxy: ready_text(t.routes[0]),
+        route_direct: ready_text(t.routes[1]),
+        route_proxy_fraction: (g.stats_ready && routed > 0)
+            .then(|| t.routes[0] as f64 / routed as f64),
+        blocked_count: g.log_ready.then_some(t.blocked),
+        mem_mb: mb(g.mem_shell.zip(g.mem_core).map(|(a, b)| a + b)),
+        mem_shell_mb: mb(g.mem_shell),
+        mem_core_mb: mb(g.mem_core),
+        cpu_pct: g.cpu_pct,
         exit_ip: g.exit_ip.clone(),
         exit_loc: g.exit_loc.clone(),
+        exit_state: g.exit_state.clone(),
         direct_ip: g.direct_ip.clone(),
         direct_loc: g.direct_loc.clone(),
+        direct_state: g.direct_state.clone(),
+        trouble: g.trouble.clone(),
+        version: env!("CARGO_PKG_VERSION").into(),
         groups: g.groups.clone(),
         subscriptions: subs,
         connections: g.connections.clone(),
         rules: g.rules.clone(),
     };
-    let json = serde_json::to_string(&snap).unwrap_or_else(|_| "{}".into());
-    CString::new(json).unwrap_or_default().into_raw()
+    serde_json::to_string(&snap).ok()
 }
 
 #[no_mangle]
 pub extern "C" fn purr_core_check_update_json() -> *mut c_char {
     let Some(ctx) = CTX.get().cloned() else {
         let fallback = serde_json::json!({
-            "ok": true,
+            "ok": false,
             "current": env!("CARGO_PKG_VERSION"),
-            "latest": env!("CARGO_PKG_VERSION"),
-            "has_update": false,
-            "url": "https://magpie.liujufu.dev/purr/"
+            "error": "内核未就绪",
         });
         return CString::new(fallback.to_string())
             .unwrap_or_default()
@@ -1327,9 +1667,6 @@ pub extern "C" fn purr_core_check_update_json() -> *mut c_char {
         Err(e) => serde_json::json!({
             "ok": false,
             "current": env!("CARGO_PKG_VERSION"),
-            "latest": env!("CARGO_PKG_VERSION"),
-            "has_update": false,
-            "url": "https://magpie.liujufu.dev/purr/",
             "error": e,
         }),
     };
@@ -1503,6 +1840,9 @@ pub extern "C" fn purr_core_restart_core() -> c_int {
 
 #[no_mangle]
 pub extern "C" fn purr_core_shutdown() {
+    if let Some(ctx) = CTX.get() {
+        save_telemetry(&ctx.state);
+    }
     crate::proxy::restore();
     crate::core::terminate_running();
 }

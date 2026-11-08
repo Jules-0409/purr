@@ -43,6 +43,7 @@ pub async fn log_loop(api: Api, live: Arc<Mutex<LiveState>>) {
     loop {
         match connect(&api, "/logs?level=info").await {
             Ok(mut socket) => {
+                window::set_log_live(&live);
                 while let Some(message) = socket.next().await {
                     let Ok(message) = message else { break };
                     let Some(text) = message_text(message) else {

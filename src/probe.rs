@@ -41,14 +41,22 @@ impl SiteProbe {
     pub fn ms_text(&self) -> String {
         match self.ms {
             Some(ms) => format!("{ms}ms"),
+            // 规则把它拦掉了（REJECT / REJECT-DROP）：不是超时
+            None if self.blocked() => "已拦截".into(),
             // 连走哪条路都没查到（内核没就绪）：拿不到就是「—」，不算超时
             None if self.group.is_empty() => "—".into(),
             None => "超时".into(),
         }
     }
+    /// The route is a REJECT policy: the site is blocked by a rule, not slow.
+    pub fn blocked(&self) -> bool {
+        self.group.starts_with("REJECT")
+    }
     pub fn via_text(&self) -> String {
         if self.group.is_empty() {
             String::new()
+        } else if self.blocked() {
+            "抓老鼠".into()
         } else if self.group == "DIRECT" {
             "直连".into()
         } else {
@@ -159,7 +167,7 @@ pub async fn probe_one(
             _ => (String::new(), String::new()),
         },
     };
-    let ms = if group == "REJECT" || group.is_empty() {
+    let ms = if group.starts_with("REJECT") || group.is_empty() {
         None
     } else {
         api.delay_url(&group, &format!("https://{domain}"), 5000)
@@ -212,5 +220,8 @@ mod tests {
         assert_eq!(probe("DIRECT", None).ms_text(), "超时");
         // 连路由都没查到（内核没就绪）：拿不到，显示「—」
         assert_eq!(probe("", None).ms_text(), "—");
+        // 规则拦截：显示「已拦截」，不是「超时」
+        assert_eq!(probe("REJECT", None).ms_text(), "已拦截");
+        assert_eq!(probe("REJECT", None).via_text(), "抓老鼠");
     }
 }

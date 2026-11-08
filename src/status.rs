@@ -140,6 +140,194 @@ fn footprint_bytes_impl(_pid: u32) -> Option<u64> {
     None
 }
 
+/// Total CPU time (user + system) a process has used so far; None when the OS will not say.
+pub fn cpu_time(pid: u32) -> Option<std::time::Duration> {
+    if pid == 0 {
+        return None;
+    }
+    cpu_time_impl(pid)
+}
+
+#[cfg(target_os = "macos")]
+fn cpu_time_impl(pid: u32) -> Option<std::time::Duration> {
+    // rusage_info_v2 starts with ri_user_time, ri_system_time in mach absolute time units.
+    #[repr(C)]
+    struct RusageInfo {
+        uuid: [u8; 16],
+        counters: [u64; 40],
+    }
+    #[repr(C)]
+    struct Timebase {
+        numer: u32,
+        denom: u32,
+    }
+    unsafe extern "C" {
+        fn proc_pid_rusage(pid: i32, flavor: i32, buffer: *mut RusageInfo) -> i32;
+        fn mach_timebase_info(info: *mut Timebase) -> i32;
+    }
+    let mut info = std::mem::MaybeUninit::<RusageInfo>::zeroed();
+    if unsafe { proc_pid_rusage(pid as i32, 2, info.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    let info = unsafe { info.assume_init() };
+    let mut tb = Timebase { numer: 0, denom: 0 };
+    if unsafe { mach_timebase_info(&mut tb) } != 0 || tb.denom == 0 {
+        return None;
+    }
+    let ticks = info.counters[0] as u128 + info.counters[1] as u128;
+    let nanos = ticks * tb.numer as u128 / tb.denom as u128;
+    Some(std::time::Duration::from_nanos(nanos as u64))
+}
+
+#[cfg(windows)]
+fn cpu_time_impl(pid: u32) -> Option<std::time::Duration> {
+    use std::ffi::c_void;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+        fn GetProcessTimes(
+            process: *mut c_void,
+            creation: *mut u64,
+            exit: *mut u64,
+            kernel: *mut u64,
+            user: *mut u64,
+        ) -> i32;
+        fn CloseHandle(handle: *mut c_void) -> i32;
+    }
+    unsafe {
+        let handle = OpenProcess(0x1000, 0, pid);
+        if handle.is_null() {
+            return None;
+        }
+        let (mut c, mut e, mut k, mut u) = (0u64, 0u64, 0u64, 0u64);
+        let ok = GetProcessTimes(handle, &mut c, &mut e, &mut k, &mut u);
+        CloseHandle(handle);
+        (ok != 0).then(|| std::time::Duration::from_nanos((k + u) * 100))
+    }
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn cpu_time_impl(_pid: u32) -> Option<std::time::Duration> {
+    None
+}
+
+/// One reading of a process's memory (what `footprint_bytes` reports) and CPU time.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ProcSample {
+    pub memory: Option<u64>,
+    pub cpu: Option<std::time::Duration>,
+}
+
+/// Memory and CPU time of `pid`. On macOS a setuid-root core (TUN authorised) cannot be read by
+/// an unprivileged app through `proc_pid_rusage`/`proc_pidinfo`; then the system `ps` (which can)
+/// supplies its resident size and CPU time.
+pub fn process_sample(pid: u32) -> ProcSample {
+    if pid == 0 {
+        return ProcSample::default();
+    }
+    let direct = ProcSample {
+        memory: footprint_bytes(pid),
+        cpu: cpu_time(pid),
+    };
+    #[cfg(target_os = "macos")]
+    if direct.memory.is_none() || direct.cpu.is_none() {
+        if let Some((rss, cpu)) = ps_sample(pid) {
+            return ProcSample {
+                memory: direct.memory.or(Some(rss)),
+                cpu: direct.cpu.or(Some(cpu)),
+            };
+        }
+    }
+    direct
+}
+
+#[cfg(target_os = "macos")]
+fn ps_sample(pid: u32) -> Option<(u64, std::time::Duration)> {
+    let out = std::process::Command::new("/bin/ps")
+        .args(["-o", "rss=,time=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_ps_line(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// `ps -o rss=,time=`: resident KiB and CPU time as `[[dd-]hh:]mm:ss.cc`.
+#[cfg(any(target_os = "macos", test))]
+pub fn parse_ps_line(line: &str) -> Option<(u64, std::time::Duration)> {
+    let mut parts = line.split_whitespace();
+    let rss_kib: u64 = parts.next()?.parse().ok()?;
+    let time = parts.next()?;
+    let (days, clock) = match time.split_once('-') {
+        Some((d, rest)) => (d.parse::<u64>().ok()?, rest),
+        None => (0, time),
+    };
+    let mut secs = 0f64;
+    for field in clock.split(':') {
+        secs = secs * 60.0 + field.parse::<f64>().ok()?;
+    }
+    secs += days as f64 * 86400.0;
+    Some((rss_kib * 1024, std::time::Duration::from_secs_f64(secs)))
+}
+
+/// CPU share of a set of processes between two samples, as the OS monitor shows it: macOS
+/// Activity Monitor / `ps` (100 % = one core), Windows Task Manager (100 % = all cores).
+#[derive(Default)]
+pub struct CpuMeter {
+    last: Option<(std::time::Instant, Vec<u32>, std::time::Duration)>,
+}
+
+impl CpuMeter {
+    /// Records the summed CPU time of `pids` (None when any of them could not be read) and returns
+    /// the percentage since the previous reading of the same pids; None on the first reading,
+    /// after a pid changed, or when a reading is missing.
+    pub fn update(&mut self, pids: &[u32], total: Option<std::time::Duration>) -> Option<f64> {
+        let now = std::time::Instant::now();
+        let Some(total) = total else {
+            self.last = None;
+            return None;
+        };
+        let previous = self.last.replace((now, pids.to_vec(), total));
+        let (then, old_pids, old_total) = previous?;
+        if old_pids != pids {
+            return None;
+        }
+        let wall = now.saturating_duration_since(then).as_secs_f64();
+        if wall < 0.2 {
+            return None;
+        }
+        let used = total.saturating_sub(old_total).as_secs_f64();
+        Some(cpu_percent(used, wall, cpu_scale()))
+    }
+}
+
+fn cpu_scale() -> f64 {
+    if cfg!(windows) {
+        std::thread::available_parallelism().map_or(1, |n| n.get()) as f64
+    } else {
+        1.0
+    }
+}
+
+/// `used` CPU seconds over `wall` seconds, divided by `cores` (1 on macOS).
+pub fn cpu_percent(used: f64, wall: f64, cores: f64) -> f64 {
+    if wall <= 0.0 || cores <= 0.0 {
+        return 0.0;
+    }
+    used / wall * 100.0 / cores
+}
+
+/// True when the machine has a routable local address (no packet is sent).
+pub fn network_available() -> bool {
+    std::net::UdpSocket::bind("0.0.0.0:0")
+        .and_then(|s| {
+            s.connect("1.1.1.1:53")?;
+            s.local_addr()
+        })
+        .is_ok_and(|a| !a.ip().is_loopback() && !a.ip().is_unspecified())
+}
+
 /// Release allocator pages left by a window's initial resize and page teardown.
 /// This does not purge live textures or reduce display resolution.
 pub fn release_unused_memory() {
@@ -452,6 +640,40 @@ mod tests {
     fn current_process_reports_resident_memory() {
         let bytes = super::resident_bytes(std::process::id()).unwrap_or(0);
         assert!(bytes > 1024 * 1024, "resident {bytes}");
+    }
+
+    #[test]
+    fn cpu_percent_is_cpu_time_over_wall_time() {
+        assert!((super::cpu_percent(0.018, 1.0, 1.0) - 1.8).abs() < 1e-9);
+        assert!((super::cpu_percent(0.8, 1.0, 8.0) - 10.0).abs() < 1e-9);
+        assert_eq!(super::cpu_percent(1.0, 0.0, 1.0), 0.0);
+        // The current process has used some CPU, and a meter needs two samples.
+        assert!(super::cpu_time(std::process::id()).is_some());
+        let mut meter = super::CpuMeter::default();
+        let me = [std::process::id()];
+        assert_eq!(meter.update(&me, super::cpu_time(me[0])), None);
+        let spin = std::time::Instant::now();
+        let mut x = 0u64;
+        while spin.elapsed() < std::time::Duration::from_millis(300) {
+            x = x.wrapping_mul(31).wrapping_add(7);
+        }
+        std::hint::black_box(x);
+        let pct = meter
+            .update(&me, super::cpu_time(me[0]))
+            .expect("second sample");
+        assert!(pct > 1.0, "busy loop showed {pct}%");
+        assert_eq!(meter.update(&[me[0], 0], None), None);
+        assert_eq!(
+            super::parse_ps_line(" 68976   0:38.57\n"),
+            Some((68976 * 1024, std::time::Duration::from_secs_f64(38.57)))
+        );
+        assert_eq!(
+            super::parse_ps_line("10 1-02:03:04.50"),
+            Some((10240, std::time::Duration::from_secs_f64(93784.5)))
+        );
+        assert_eq!(super::parse_ps_line(""), None);
+        let me = super::process_sample(std::process::id());
+        assert!(me.memory.is_some() && me.cpu.is_some());
     }
 
     #[test]

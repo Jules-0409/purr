@@ -379,6 +379,7 @@ pub async fn serve(
     });
     let mut ticker = tokio::time::interval(Duration::from_secs(2));
     let mut trim_ticks = 0u32;
+    let mut cpu_meter = crate::status::CpuMeter::default();
     let (mut terminate, mut interrupt) = exit_signals();
     loop {
         tokio::select! {
@@ -387,9 +388,13 @@ pub async fn serve(
                 if trim_ticks <= 2 || trim_ticks.is_multiple_of(10) {
                     crate::status::release_unused_memory();
                 }
-                let shell=crate::status::footprint_bytes(std::process::id()).unwrap_or(0);
-                let kernel=crate::status::footprint_bytes(core.pid()).unwrap_or(0);
-                let label = crate::status::format_memory(Some(shell),Some(kernel));
+                let shell_sample=crate::status::process_sample(std::process::id());
+                let core_sample=crate::status::process_sample(core.pid());
+                let shell=shell_sample.memory.unwrap_or(0);
+                let kernel=core_sample.memory.unwrap_or(0);
+                let cpu_total=shell_sample.cpu.zip(core_sample.cpu).map(|(a,b)|a+b);
+                crate::window::set_cpu(&live, cpu_meter.update(&[std::process::id(), core.pid()], cpu_total));
+                let label = crate::status::format_memory(shell_sample.memory,core_sample.memory);
                 {
                     let mut guard=live.lock().expect("live lock");
                     guard.memory_shell=shell;guard.memory_core=kernel;
@@ -565,8 +570,9 @@ pub async fn serve(
                                 Ok(info) => {
                                     notice(&live, &format!("当前已是最新版本 PURR v{}", info.current));
                                 }
-                                Err(_) => {
-                                    notice(&live, &format!("当前已是最新版本 PURR v{}", env!("CARGO_PKG_VERSION")));
+                                Err(e) => {
+                                    // No answer is not "up to date".
+                                    report_error(&live, format!("检查更新失败：{e}"));
                                 }
                             }
                         });
@@ -713,12 +719,7 @@ fn notice(live: &Mutex<crate::window::LiveState>, message: &str) {
     s.bump();
 }
 fn network_available() -> bool {
-    std::net::UdpSocket::bind("0.0.0.0:0")
-        .and_then(|s| {
-            s.connect("1.1.1.1:53")?;
-            s.local_addr()
-        })
-        .is_ok_and(|a| !a.ip().is_loopback() && !a.ip().is_unspecified())
+    crate::status::network_available()
 }
 fn open_network_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -981,17 +982,9 @@ async fn health_loop(api: Api, live: Arc<Mutex<crate::window::LiveState>>) {
             {
                 None
             } else {
-                state
-                    .groups
-                    .iter()
-                    .find(|g| {
-                        g.kind == "select"
-                            && if state.mode == "global" {
-                                g.name == "GLOBAL"
-                            } else {
-                                g.name != "GLOBAL"
-                            }
-                    })
+                // The group the overview and tray show (top-level select, e.g. "🌍 出口").
+                crate::present::main_group(&state.groups, &state.mode)
+                    .filter(|g| g.kind == "select")
                     .cloned()
             }
         };
@@ -1007,7 +1000,7 @@ async fn health_loop(api: Api, live: Arc<Mutex<crate::window::LiveState>>) {
             .nodes
             .iter()
             .find(|n| n.name == group.now)
-            .is_none_or(|n| crate::present::skip_delay(&n.kind))
+            .is_none_or(|n| !crate::present::probe_delay(&n.kind))
         {
             continue;
         }

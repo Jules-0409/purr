@@ -56,9 +56,9 @@ export component MainWindow inherits Window {
     in-out property <string> line-warm <=> S.line-hold;
     in property <string> tip-text: "按住耳朵 / Space 叫醒它";
     in-out property <string> down-value <=> S.dn;
-    in property <string> down-unit: "MB/s";
+    in-out property <string> down-unit <=> S.dn-u;
     in-out property <string> up-value <=> S.up;
-    in property <string> up-unit: "MB/s";
+    in-out property <string> up-unit <=> S.up-u;
     in-out property <string> elapsed <=> S.tm;
     in-out property <int> connection-count <=> S.connection-count;
     in-out property <string> peak-text <=> S.peak;

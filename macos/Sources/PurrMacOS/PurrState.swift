@@ -8,15 +8,20 @@ import PurrCore
 // MARK: - Theme Tokens (matching PURR-desktop-v5.html :root)
 /// Speed text. Below 1 MB/s it switches to KB/s: one decimal of MB/s turns every ordinary
 /// browsing rate (under ~50 KB/s) into "0.0".
+/// Decimal units everywhere (1 MB = 10^6 B, same rule as the Rust `present` module).
 enum PurrRate {
     static func parts(_ mbPerSec: Double) -> (String, String) {
         if mbPerSec >= 1.0 { return (String(format: "%.1f", mbPerSec), "MB/s") }
-        return (String(format: "%.0f", max(0, mbPerSec) * 1024.0), "KB/s")
+        return (String(format: "%.0f", max(0, mbPerSec) * 1000.0), "KB/s")
     }
     /// Menu-bar form, at most 5 characters after the arrow.
     static func compact(_ mbPerSec: Double) -> String {
         if mbPerSec >= 1.0 { return String(format: "%4.1fM", mbPerSec) }
-        return String(format: "%4.0fK", max(0, mbPerSec) * 1024.0)
+        return String(format: "%4.0fK", max(0, mbPerSec) * 1000.0)
+    }
+    /// Whole decimal GB as providers print quotas; one decimal below 10 GB (`present::gb_text`).
+    static func gb(_ v: Double) -> String {
+        v < 10 ? String(format: "%.1f", v) : String(format: "%.0f", v)
     }
 }
 
@@ -118,7 +123,10 @@ struct PurrConn: Identifiable {
     var chain: String
     var dn: Double
     var up: Double
-    var age: Double
+    /// Seconds since the connection started; nil when the core's start time did not parse.
+    var age: Double?
+    var ageText: String = ""
+    var ageLabel: String { !ageText.isEmpty ? ageText : (age.map { "\(Int($0))s" } ?? "—") }
 }
 
 struct PurrLog: Identifiable {
@@ -133,24 +141,25 @@ struct PurrRuleItem: Identifiable {
     var kind: String
     var match: String
     var policy: String
-    var hits: Int
+    /// The core's match count since it started (`extra.hitCount`); nil = not reported.
+    var hits: Int?
 }
 
 struct PurrSubItem: Identifiable {
     let id: Int
     var name: String
     var desc: String
-    /// Whole GB from the subscription's userinfo header; -1 = the provider did not say.
-    var used: Int
-    var total: Int
+    /// Decimal GB from the subscription's userinfo header (as the provider prints it); -1 = not said.
+    var used: Double
+    var total: Double
     var exp: String
     var active: Bool
     /// Days until the provider's expiry; nil = not provided.
     var daysLeft: Int? = nil
-    var usedText: String { used >= 0 ? "\(used)" : "—" }
-    var totalText: String { total > 0 ? "\(total)" : "—" }
-    var fraction: Double { used >= 0 && total > 0 ? min(1.0, Double(used) / Double(total)) : 0 }
-    var leftText: String { used >= 0 && total > 0 ? "剩 \(max(0, total - used)) GB" : "额度未提供" }
+    var usedText: String { used >= 0 ? PurrRate.gb(used) : "—" }
+    var totalText: String { total > 0 ? PurrRate.gb(total) : "—" }
+    var fraction: Double { used >= 0 && total > 0 ? min(1.0, used / total) : 0 }
+    var leftText: String { used >= 0 && total > 0 ? "剩 \(PurrRate.gb(max(0, total - used))) GB" : "额度未提供" }
     var expiryText: String {
         guard let d = daysLeft else { return "到期时间未提供" }
         return d <= 0 ? "已到期" : "\(d) 天后到期"
@@ -298,27 +307,53 @@ final class PurrStore: ObservableObject {
     @Published var load: Double = 0.0
     @Published var peakDn: Double = 0.0
     @Published var peakUp: Double = 0.0
-    @Published var totalProxyMB: Double = 0.0
-    @Published var totalDirectMB: Double = 0.0
-    @Published var blockedMice: Int = 0
-    @Published var memMB: Double = 0  // 0 = not measured yet ("—")
+    /// Today's traffic (local calendar day, persisted by the core in statistics.json), already
+    /// formatted with its unit ("1.50 GB"); nil until the core answered once this run.
+    @Published var todayTotal: String? = nil
+    @Published var todayDown: String? = nil
+    @Published var todayUp: String? = nil
+    @Published var routeProxy: String? = nil
+    @Published var routeDirect: String? = nil
+    /// Proxy share of today's routed bytes; nil when nothing was routed yet.
+    @Published var routeProxyFraction: Double? = nil
+    /// Rule-rejected connections today; nil until the core's log stream connected.
+    @Published var blockedMice: Int? = nil
+    /// Decimal MB of Purr + core; nil until both were measured.
+    @Published var memMB: Double? = nil
+    @Published var memShellMB: Double? = nil
+    @Published var memCoreMB: Double? = nil
+    /// CPU % of Purr + core (100 % = one core, like Activity Monitor); nil until two samples.
+    @Published var cpuPct: Double? = nil
     @Published var connectedAt: Date = Date()
-    @Published var elapsedStr: String = "00:00:00"
-    @Published var histDn: [Double] = Array(repeating: 0.0, count: 120)
-    @Published var histUp: [Double] = Array(repeating: 0.0, count: 120)
+    /// "—" until a session has been timed (no nap yet this run).
+    @Published var elapsedStr: String = "—"
+    /// One sample per second while awake: exactly the last 60 s; cleared on sleep.
+    static let historySamples = 60
+    @Published var histDn: [Double] = Array(repeating: 0.0, count: PurrStore.historySamples)
+    @Published var histUp: [Double] = Array(repeating: 0.0, count: PurrStore.historySamples)
+    /// Samples recorded since the cat woke up (peak is "—" until there is one).
+    @Published var histCount: Int = 0
 
     // Real Exit IP & Direct IP
     @Published var realExitIp: String = "—"
-    @Published var realExitLoc: String = "直连未经过窝点"
-    @Published var directIp: String = "检测中…"
-    @Published var directLoc: String = "—"
+    @Published var realExitLoc: String = ""
+    /// "pending" (looking up), "ok", "failed" — from the core.
+    @Published var exitState: String = "pending"
+    @Published var directIp: String = "—"
+    @Published var directLoc: String = ""
+    @Published var directState: String = "pending"
+    /// The version the Rust core was built as (Cargo `CARGO_PKG_VERSION`).
+    static let appVersion: String = {
+        guard let p = purr_core_version() else { return "—" }
+        defer { purr_string_free(p) }
+        return String(cString: p)
+    }()
     private var nodeHistories: [String: [Int?]] = [:]
 
     // Nodes & Groups
     @Published var nodes: [PurrNode] = []
-    @Published var groups: [PurrGroup] = [
-        PurrGroup(id: 0, name: "节点选择", selected: 0, nodeIds: [0])
-    ]
+    /// Empty until the core's first real snapshot: no placeholder group or node names.
+    @Published var groups: [PurrGroup] = []
     @Published var selectedGroupIdx: Int = 0 {
         didSet { if selectedGroupIdx != oldValue && page == 1 { autoSpeedTest() } }
     }
@@ -468,13 +503,19 @@ final class PurrStore: ObservableObject {
                   let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 return
             }
+            let ok = dict["ok"] as? Bool ?? false
             let hasUpdate = dict["has_update"] as? Bool ?? false
-            let latest = dict["latest"] as? String ?? "0.1.0"
-            let current = dict["current"] as? String ?? "0.1.0"
-            let urlStr = dict["url"] as? String ?? "https://magpie.liujufu.dev/purr/"
+            let latest = dict["latest"] as? String ?? ""
+            let current = dict["current"] as? String ?? PurrStore.appVersion
+            let urlStr = dict["url"] as? String ?? ""
+            let err = dict["error"] as? String ?? ""
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                if hasUpdate {
+                if !ok {
+                    // The check did not get an answer: say so, never "已是最新".
+                    self.showToast("检查更新失败" + (err.isEmpty ? "" : "：\(err)"))
+                    self.plog("warn", "检查更新失败" + (err.isEmpty ? "" : "：\(err)"))
+                } else if hasUpdate {
                     self.showToast("发现新版本 v\(latest) · 正在打开下载页")
                     if let url = URL(string: urlStr) {
                         NSWorkspace.shared.open(url)
@@ -693,18 +734,6 @@ final class PurrStore: ObservableObject {
         }
     }
 
-    func cycleAppPolicy(for connId: Int) {
-        guard let idx = conns.firstIndex(where: { $0.id == connId }) else { return }
-        let appName = conns[idx].app
-        let groupNames = groups.map(\.name) + ["DIRECT"]
-        let cur = conns[idx].pol
-        let nextPol = groupNames[((groupNames.firstIndex(of: cur) ?? 0) + 1) % groupNames.count]
-        conns[idx].pol = nextPol
-        let label = nextPol == "DIRECT" ? "直连" : nextPol
-        showToast("\(appName) 规则已设为 → \(label)")
-        plog("info", "应用分流规则：PROCESS-NAME,\(appName) → \(label)")
-    }
-
     // Toast
     @Published var toastText: String = ""
     @Published var toastVisible: Bool = false
@@ -718,7 +747,9 @@ final class PurrStore: ObservableObject {
         var routeGroup: String
         /// 0 = 还没测（显示「—」），-1 = 超时，>0 = 实测毫秒
         var ms: Int
-        var msText: String { ms > 0 ? "\(ms)ms" : (ms < 0 ? "超时" : "—") }
+        /// The route is a REJECT rule: blocked, not slow.
+        var blocked: Bool = false
+        var msText: String { blocked ? "已拦截" : (ms > 0 ? "\(ms)ms" : (ms < 0 ? "超时" : "—")) }
     }
     @Published var showServiceDetail: Bool = false {
         didSet { if showServiceDetail && !oldValue { probeServices() } }
@@ -789,7 +820,7 @@ final class PurrStore: ObservableObject {
         isTestingServices = true
         lastServiceProbeAt = Date()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var parsed: [String: (String, Int)] = [:]
+            var parsed: [String: (String, Int, Bool)] = [:]
             if let ptr = purr_core_probe_sites_json() {
                 let str = String(cString: ptr)
                 purr_string_free(ptr)
@@ -803,7 +834,8 @@ final class PurrStore: ObservableObject {
                         let via = site["via"] as? String ?? (group.isEmpty ? "" : (group == "DIRECT" ? "直连" : (node.isEmpty ? group : "\(group) › \(node)")))
                         let ms = (site["ms"] as? NSNumber)?.intValue ?? -1
                         // 连走哪条路都没查到（内核没就绪）：拿不到就是「—」，不算超时
-                        parsed[id] = (via, ms > 0 ? ms : (group.isEmpty ? 0 : -1))
+                        let blocked = group.uppercased().hasPrefix("REJECT")
+                        parsed[id] = (via, ms > 0 ? ms : (group.isEmpty || blocked ? 0 : -1), blocked)
                     }
                 }
             }
@@ -813,6 +845,7 @@ final class PurrStore: ObservableObject {
                     if let r = parsed[self.serviceProbes[i].id] {
                         self.serviceProbes[i].routeGroup = r.0
                         self.serviceProbes[i].ms = r.1
+                        self.serviceProbes[i].blocked = r.2
                     }
                 }
                 // 内核还没就绪（一条路由都没查到）就不计满节流，15 秒后重试
@@ -848,7 +881,6 @@ final class PurrStore: ObservableObject {
     ]
 
     init() {
-        seedPlaceholderNodes()
         if PurrSnapshot.active { return }
         if !purr_core_disclaimer_accepted() {
             disclaimerPending = true
@@ -894,15 +926,6 @@ final class PurrStore: ObservableObject {
         }
     }
 
-    private func seedPlaceholderNodes() {
-        self.nodes = [
-            PurrNode(id: 0, name: "等待订阅", proto: "—", ms: 0, jitter: -1, loss: -1, uptime: -1, history: [])
-        ]
-        self.groups = [
-            PurrGroup(id: 0, name: "节点选择", selected: 0, nodeIds: [0])
-        ]
-    }
-
     func showToast(_ text: String) {
         toastText = text
         withAnimation(.easeOut(duration: 0.22)) {
@@ -931,7 +954,7 @@ final class PurrStore: ObservableObject {
 
     var currentPrimaryNode: PurrNode {
         guard !groups.isEmpty, !nodes.isEmpty else {
-            return PurrNode(id: 0, name: "未选择", proto: "—", ms: 0, jitter: -1, loss: -1, uptime: -1, history: [])
+            return PurrNode(id: 0, name: "—", proto: "—", ms: 0, jitter: -1, loss: -1, uptime: -1, history: [])
         }
         let idx = min(max(0, groups[0].selected), nodes.count - 1)
         return nodes[idx]
@@ -952,22 +975,31 @@ final class PurrStore: ObservableObject {
         }
     }
 
+    /// Local (direct) exit as text for the modal: "检测中…" only while the first lookup runs.
+    var directIpText: String { directState == "pending" ? "检测中…" : directIp }
+    var directLocText: String { directState == "failed" ? "查不到本地出口（稍后自动重试）" : (directLoc.isEmpty ? "—" : directLoc) }
+
     func exitInfo() -> (ip: String, loc: String) {
-        let dIp = directIp == "检测中…" ? "—" : directIp
+        let dIp = directState == "ok" ? directIp : "—"
+        let dLoc = directState == "ok" && !directLoc.isEmpty ? directLoc : "本地出口"
         if !isAwake {
-            return (dIp, "\(directLoc)（睡着时未经过窝点）")
+            return (dIp, "\(dLoc)（睡着时未经过窝点）")
         }
         if let e = errKind {
             return (dIp, "本地 IP · 代理异常（\(troubleInfo(for: e).st)）")
         }
         if mode == "direct" {
-            return (dIp, "\(directLoc)，没经过窝点")
+            return (dIp, "\(dLoc)，没经过窝点")
         }
-        let n = currentPrimaryNode
-        if realExitIp != "—" && !realExitIp.isEmpty {
-            return (realExitIp, "\(realExitLoc) · 经由 \(n.name) · \(n.proto)")
+        let via = groups.isEmpty ? "" : "经由 \(currentPrimaryNode.name) · \(currentPrimaryNode.proto)"
+        switch exitState {
+        case "ok":
+            return (realExitIp, [realExitLoc, via].filter { !$0.isEmpty }.joined(separator: " · "))
+        case "failed":
+            return ("—", ["出口 IP 查不到", via].filter { !$0.isEmpty }.joined(separator: " · "))
+        default:
+            return ("查找中…", via)
         }
-        return ("查找中…", "经由 \(n.name) · \(n.proto)")
     }
 
     // Hold to wake / sleep
@@ -1007,8 +1039,10 @@ final class PurrStore: ObservableObject {
         isAwake = true
         connectedAt = Date()
         elapsedStr = "00:00:00"
-        showToast("已连接 · \(currentPrimaryNode.name)")
-        plog("purr", "摸醒了猫，连接到 \(currentPrimaryNode.name)")
+        clearHistory()
+        let name = groups.isEmpty ? "" : currentPrimaryNode.name
+        showToast(name.isEmpty ? "已连接" : "已连接 · \(name)")
+        plog("purr", name.isEmpty ? "摸醒了猫" : "摸醒了猫，连接到 \(name)")
     }
 
     func sleep() {
@@ -1027,6 +1061,8 @@ final class PurrStore: ObservableObject {
         dnSpeed = 0
         upSpeed = 0
         load = 0
+        // The chart and "60 秒峰值" describe this session only.
+        clearHistory()
         showToast("已断开 · 它又睡着了")
         plog("purr", "哄猫睡觉，断开连接")
     }
@@ -1102,13 +1138,23 @@ final class PurrStore: ObservableObject {
         }
     }
 
+    func clearHistory() {
+        histDn = Array(repeating: 0.0, count: PurrStore.historySamples)
+        histUp = Array(repeating: 0.0, count: PurrStore.historySamples)
+        histCount = 0
+        peakDn = 0
+        peakUp = 0
+    }
+
     func setErr(_ k: String?) {
         troubleTimer?.invalidate()
         troubleTimer = nil
         troubleCountdown = 0
         errKind = k
         if let k = k {
-            if !isAwake {
+            // Snapshot fixtures show trouble states awake; live trouble comes from the core and
+            // never wakes the cat by itself.
+            if PurrSnapshot.active && !isAwake {
                 isAwake = true
                 connectedAt = Date()
             }
@@ -1133,16 +1179,37 @@ final class PurrStore: ObservableObject {
     func performTroubleFix(_ action: String) {
         let prevErr = errKind
         switch action {
-        case "swap":
-            let b = bestAlternativeNodeId()
-            selectNode(inGroup: 0, nodeId: b)
-            setErr(nil)
-        case "retry":
-            showToast("闻一闻…")
-            triggerSpeedTest()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                self.setErr(nil)
-                self.showToast(prevErr == "offline" ? "网络回来了 · 继续呼噜" : "它回应了 · 继续呼噜")
+        case "swap", "retry":
+            if PurrSnapshot.active {
+                setErr(nil)
+                return
+            }
+            // Real fix in the core: "swap" probes the other members and switches to the fastest,
+            // "retry" re-checks (delay probe / network) and only clears the trouble if it passes.
+            showToast(action == "swap" ? "正在找个暖和的窝…" : "闻一闻…")
+            troubleTimer?.invalidate()
+            troubleTimer = nil
+            troubleCountdown = 0
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let ptr = action.withCString { purr_core_fix_trouble_json($0) }
+                var ok = false
+                var msg = ""
+                if let ptr = ptr {
+                    let str = String(cString: ptr)
+                    purr_string_free(ptr)
+                    if let data = str.data(using: .utf8),
+                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        ok = obj["ok"] as? Bool ?? false
+                        msg = obj["message"] as? String ?? ""
+                    }
+                }
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.showToast(msg.isEmpty ? (ok ? "继续呼噜" : "还没好") : msg)
+                    self.plog(ok ? "info" : "warn", msg)
+                    self.syncSnapshotFromCore()
+                    if ok && self.errKind == prevErr { self.setErr(nil) }
+                }
             }
             return
         case "subpg":
@@ -1222,40 +1289,47 @@ final class PurrStore: ObservableObject {
 
     private func syncSnapshotFromCore(recordHistory: Bool = false) {
         guard let ptr = purr_core_snapshot_json() else { return }
-        defer { purr_string_free(ptr) }
         let jsonStr = String(cString: ptr)
+        purr_string_free(ptr)
+        applySnapshot(jsonStr, recordHistory: recordHistory, sampleTraffic: true)
+    }
+
+    /// Applies one core snapshot (`purr_core_snapshot_json`). Every value shown comes from it;
+    /// a missing value stays nil and the UI shows "—".
+    func applySnapshot(_ jsonStr: String, recordHistory: Bool = false, sampleTraffic: Bool = false) {
         guard let data = jsonStr.data(using: .utf8),
               let snap = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return
         }
 
-        if let mem = snap["mem_mb"] as? Double, mem > 1.0 {
-            self.memMB = mem
-        }
-        if let eIp = snap["exit_ip"] as? String, !eIp.isEmpty {
-            self.realExitIp = eIp
-        }
-        if let eLoc = snap["exit_loc"] as? String, !eLoc.isEmpty {
-            self.realExitLoc = eLoc
-        }
-        if let dIp = snap["direct_ip"] as? String, !dIp.isEmpty {
-            self.directIp = dIp
-        }
-        if let dLoc = snap["direct_loc"] as? String, !dLoc.isEmpty {
-            self.directLoc = dLoc
-        }
+        self.memMB = snap["mem_mb"] as? Double
+        self.memShellMB = snap["mem_shell_mb"] as? Double
+        self.memCoreMB = snap["mem_core_mb"] as? Double
+        self.cpuPct = snap["cpu_pct"] as? Double
+        self.realExitIp = snap["exit_ip"] as? String ?? "—"
+        self.realExitLoc = snap["exit_loc"] as? String ?? ""
+        self.exitState = snap["exit_state"] as? String ?? "pending"
+        self.directIp = snap["direct_ip"] as? String ?? "—"
+        self.directLoc = snap["direct_loc"] as? String ?? ""
+        self.directState = snap["direct_state"] as? String ?? "pending"
         if let tun = snap["tun"] as? Bool {
             self.tunEnabled = tun
         }
-        if let pMb = snap["proxy_mb"] as? Double {
-            self.totalProxyMB = pMb
-        }
-        if let dMb = snap["direct_mb"] as? Double {
-            self.totalDirectMB = dMb
-        }
+        self.todayTotal = snap["today_total"] as? String
+        self.todayDown = snap["today_down"] as? String
+        self.todayUp = snap["today_up"] as? String
+        self.routeProxy = snap["route_proxy"] as? String
+        self.routeDirect = snap["route_direct"] as? String
+        self.routeProxyFraction = snap["route_proxy_fraction"] as? Double
         self.statsReady = snap["ready"] as? Bool ?? false
-        if let blocked = snap["blocked_count"] as? Int {
-            self.blockedMice = blocked
+        self.blockedMice = snap["blocked_count"] as? Int
+
+        // Trouble detected by the core (same rules as Windows): drive the existing trouble UI.
+        let coreTrouble = snap["trouble"] as? String ?? ""
+        let next: String? = coreTrouble.isEmpty ? nil : coreTrouble
+        if next != self.errKind && !PurrSnapshot.active {
+            self.setErr(next)
+            if let k = next { self.plog("warn", "卡住了：\(self.troubleInfo(for: k).st)") }
         }
 
         if isAwake {
@@ -1266,12 +1340,16 @@ final class PurrStore: ObservableObject {
             self.load = min(1.0, dn / 16.0)
             let secs = max(0, Int(Date().timeIntervalSince(connectedAt)))
             self.elapsedStr = String(format: "%02d:%02d:%02d", secs / 3600, (secs / 60) % 60, secs % 60)
-            self.histDn.append(dn)
-            if self.histDn.count > 120 { self.histDn.removeFirst() }
-            self.histUp.append(up)
-            if self.histUp.count > 120 { self.histUp.removeFirst() }
-            self.peakDn = self.histDn.max() ?? 0.0
-            self.peakUp = self.histUp.max() ?? 0.0
+            if sampleTraffic && self.statsReady {
+                let n = PurrStore.historySamples
+                self.histDn.append(dn)
+                if self.histDn.count > n { self.histDn.removeFirst(self.histDn.count - n) }
+                self.histUp.append(up)
+                if self.histUp.count > n { self.histUp.removeFirst(self.histUp.count - n) }
+                self.histCount = min(n, self.histCount + 1)
+                self.peakDn = self.histDn.suffix(self.histCount).max() ?? 0.0
+                self.peakUp = self.histUp.suffix(self.histCount).max() ?? 0.0
+            }
         }
 
         // Subscriptions
@@ -1283,8 +1361,8 @@ final class PurrStore: ObservableObject {
                     id: id,
                     name: name,
                     desc: s["desc"] as? String ?? "",
-                    used: s["used"] as? Int ?? -1,
-                    total: s["total"] as? Int ?? 0,
+                    used: (s["used"] as? NSNumber)?.doubleValue ?? -1,
+                    total: (s["total"] as? NSNumber)?.doubleValue ?? 0,
                     exp: s["exp"] as? String ?? "—",
                     active: s["active"] as? Bool ?? false,
                     daysLeft: s["days_left"] as? Int
@@ -1299,15 +1377,15 @@ final class PurrStore: ObservableObject {
             var builtGroups: [PurrGroup] = []
 
             for (gIdx, gDict) in rawGroups.enumerated() {
-                let gName = gDict["name"] as? String ?? "节点选择"
+                guard let gName = gDict["name"] as? String, !gName.isEmpty else { continue }
                 let gNow = gDict["now"] as? String ?? ""
                 let rawNodes = gDict["nodes"] as? [[String: Any]] ?? []
                 var nodeIds: [Int] = []
                 var selectedNodeId: Int = 0
 
                 for nDict in rawNodes {
-                    let nName = nDict["name"] as? String ?? "节点"
-                    let nProto = nDict["proto"] as? String ?? "Proxy"
+                    guard let nName = nDict["name"] as? String, !nName.isEmpty else { continue }
+                    let nProto = nDict["proto"] as? String ?? "—"
                     let nMs = max(0, nDict["ms"] as? Int ?? 0)
                     let nodeId: Int
                     if let existing = nodeIndexByName[nName] {
@@ -1380,14 +1458,15 @@ final class PurrStore: ObservableObject {
                 PurrConn(
                     id: idx + 1,
                     rawId: c["id"] as? String ?? "",
-                    app: c["app"] as? String ?? "System",
+                    app: c["app"] as? String ?? "—",
                     host: c["host"] as? String ?? "—",
-                    rule: c["rule"] as? String ?? "MATCH",
-                    pol: c["pol"] as? String ?? "DIRECT",
+                    rule: c["rule"] as? String ?? "—",
+                    pol: c["pol"] as? String ?? "—",
                     chain: c["chain"] as? String ?? "",
                     dn: c["dn_kb"] as? Double ?? 0.0,
                     up: c["up_kb"] as? Double ?? 0.0,
-                    age: Double(c["age_s"] as? Int ?? 1)
+                    age: (c["age_s"] as? NSNumber)?.doubleValue,
+                    ageText: c["age"] as? String ?? ""
                 )
             }
         }
@@ -1397,10 +1476,10 @@ final class PurrStore: ObservableObject {
             self.allRules = rawRules.enumerated().map { idx, r in
                 PurrRuleItem(
                     id: idx + 1,
-                    kind: r["kind"] as? String ?? "MATCH",
-                    match: r["match_str"] as? String ?? "*",
-                    policy: r["policy"] as? String ?? "DIRECT",
-                    hits: 0
+                    kind: r["kind"] as? String ?? "—",
+                    match: r["match_str"] as? String ?? "—",
+                    policy: r["policy"] as? String ?? "—",
+                    hits: (r["hits"] as? NSNumber)?.intValue
                 )
             }
         }

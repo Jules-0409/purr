@@ -96,8 +96,8 @@ component SpeedCell inherits Rectangle {
     Rectangle { x: -0.5px; y: -0.5px; width: parent.width + 1px; height: parent.height + 1px; border-width: 1px; border-color: T.line; border-radius: 3.5px; }
     VerticalLayout {
         padding-left: 7px; padding-right: 7px; padding-top: 2px; padding-bottom: 2px; spacing: 0px;
-        Text { text: "↑ " + (S.up.character-count < 4 ? " " : "") + S.up + " MB/s"; font-family: T.mono; font-size: 9.5px; letter-spacing: 9.5px * T.mt; font-weight: 500; color: T.mute; horizontal-alignment: right; vertical-alignment: center; height: 12px; }
-        Text { text: "↓ " + (S.dn.character-count < 4 ? " " : "") + S.dn + " MB/s"; font-family: T.mono; font-size: 9.5px; letter-spacing: 9.5px * T.mt; font-weight: 700; color: T.ink; horizontal-alignment: right; vertical-alignment: center; height: 12px; }
+        Text { text: "↑ " + (S.up.character-count < 4 ? " " : "") + S.up + " " + S.up-u; font-family: T.mono; font-size: 9.5px; letter-spacing: 9.5px * T.mt; font-weight: 500; color: T.mute; horizontal-alignment: right; vertical-alignment: center; height: 12px; }
+        Text { text: "↓ " + (S.dn.character-count < 4 ? " " : "") + S.dn + " " + S.dn-u; font-family: T.mono; font-size: 9.5px; letter-spacing: 9.5px * T.mt; font-weight: 700; color: T.ink; horizontal-alignment: right; vertical-alignment: center; height: 12px; }
     }
 }
 
@@ -239,7 +239,8 @@ export component Tray inherits Rectangle {
         x: 0; y: 0;
         first-run: S.first; awake: S.on; sys-proxy: S.sys; tun-mode: S.tun; tun-auth: S.tun-auth; mode: S.mode;
         subtitle: S.first ? "先导入订阅" : S.err != "" ? S.tr-st : S.on ? (S.mode == "direct" ? "不经过窝点 · " + (S.ex-ip != "" ? S.ex-ip : "—") : S.node-label + " · " + S.node-delay + " · " + (S.ex-ip != "" ? S.ex-ip : "—")) : ("系统代理已关 · 端口 " + S.port + " 仍在");
-        down: S.dn; up: S.up; memory: S.mem.to-float() > 0 ? Math.round(S.mem.to-float()) : S.mem; total: S.tot; unit: S.total-unit;
+        down: S.dn + " " + S.dn-u; up: S.up + " " + S.up-u; memory: S.mem.to-float() > 0 ? Math.round(S.mem.to-float()) : S.mem; total: S.tot; unit: S.total-unit;
+        group-label: S.group-label;
         trouble: S.err; nodes: S.tray-nodes;
         action(a, b) => {
             if a == "toggle" { S.tray-switch(); }

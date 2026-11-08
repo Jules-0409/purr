@@ -28,6 +28,8 @@ component StatCell inherits Rectangle {
     in property <string> value;
     in property <string> unit;
     in property <string> small;
+    // Optional second sub line (memory: measured CPU); hidden when empty.
+    in property <string> small2;
     in property <bool> border: true;
     in property <bool> meter;
     in property <float> pct;
@@ -42,6 +44,7 @@ component StatCell inherits Rectangle {
             Rectangle { x: 0; y: 0; height: 6px; width: parent.width * Math.min(100, root.pct) / 100; background: T.ink; }
         }
         Text { text: root.small; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; height: 14px; vertical-alignment: center; overflow: elide; }
+        if root.small2 != "": Text { text: root.small2; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; height: 14px; vertical-alignment: center; overflow: elide; }
     }
     if root.border: Rectangle { x: 0; y: parent.height - 1px; width: parent.width; height: 1px; background: T.line; }
 }
@@ -416,12 +419,12 @@ export component OverviewPage inherits Rectangle {
             x: 780px; y: 0; width: 340px; height: 300px;
             Rectangle { x: 0; y: 0; width: 1.5px; height: parent.height; background: T.ink; }
             property <length> cw: (340px - 24px - 20px) / 2;
-            StatCell { x: 24px; y: 0; width: parent.cw; height: 100px; label: "DOWN · 下行网速 ↓"; value: S.dn; unit: "MB/s"; small: S.dn-s; }
-            StatCell { x: 24px + parent.cw + 20px; y: 0; width: parent.cw; height: 100px; label: "UP · 上行网速 ↑"; value: S.up; unit: "MB/s"; small: S.up-s; }
+            StatCell { x: 24px; y: 0; width: parent.cw; height: 100px; label: "DOWN · 下行网速 ↓"; value: S.dn; unit: S.dn-u; small: S.dn-s; }
+            StatCell { x: 24px + parent.cw + 20px; y: 0; width: parent.cw; height: 100px; label: "UP · 上行网速 ↑"; value: S.up; unit: S.up-u; small: S.up-s; }
             StatCell { x: 24px; y: 100px; width: parent.cw; height: 100px; label: S.l3; value: S.tm; unit: ""; small: S.tm-s; }
             StatCell { x: 24px + parent.cw + 20px; y: 100px; width: parent.cw; height: 100px; label: "TODAY"; value: S.tot; unit: S.total-unit; small: S.tot-s; }
             StatCell { x: 24px; y: 200px; width: parent.cw; height: 100px; label: "CONNECTIONS"; value: S.cnt; unit: "条"; small: S.cnt-s; border: false; }
-            StatCell { x: 24px + parent.cw + 20px; y: 200px; width: parent.cw; height: 100px; label: "MEMORY · 内存"; value: S.mem; unit: "MB"; small: S.mem-s; border: false; meter: true; pct: S.mem-pct; }
+            StatCell { x: 24px + parent.cw + 20px; y: 200px; width: parent.cw; height: 100px; label: "MEMORY · 内存"; value: S.mem; unit: "MB"; small: S.mem-s; small2: S.cpu-s; border: false; }
         }
         // ---- traffic scope: padding-top 14, VStack(spacing 8): header + 170 px canvas,
         // centred vertically in the bottom row (.frame(maxHeight: .infinity))
@@ -488,11 +491,11 @@ export component OverviewPage inherits Rectangle {
                         HorizontalLayout { height: 13.2px;
                             Text { text: "■ 经过窝点 "; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
                             Text { text: S.proxy-detail; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: center; }
-                            Text { text: " · " + Math.round(S.proxy-fraction * 100) + "%"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                            Text { text: S.route-known ? " · " + Math.round(S.proxy-fraction * 100) + "%" : " · —"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
                             Rectangle { horizontal-stretch: 1; }
                             Text { text: "▨ 直连 "; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
                             Text { text: S.direct-detail; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; font-weight: 700; color: T.ink; vertical-alignment: center; }
-                            Text { text: " · " + (100 - Math.round(S.proxy-fraction * 100)) + "%"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
+                            Text { text: S.route-known ? " · " + (100 - Math.round(S.proxy-fraction * 100)) + "%" : " · —"; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }
                         }
                         HorizontalLayout { height: 13.2px; alignment: start;
                             Text { text: "抓到 "; font-family: T.mono; font-size: 11px; letter-spacing: 11px * T.mt; color: T.mute; vertical-alignment: center; }

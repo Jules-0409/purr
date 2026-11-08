@@ -111,9 +111,63 @@ fn decode(s: &str) -> String {
     }
     String::from_utf8_lossy(&bytes).into_owned()
 }
+/// Calendar day (YYYY-MM-DD) of `epoch` on the user's own clock: the day the statistics roll on
+/// and the day an expiry is shown as. UTC would roll "today" at 08:00 in China.
 pub fn date(epoch: u64) -> String {
-    let z = (epoch / 86400) as i64 + 719468;
-    let era = z / 146097;
+    civil_date(epoch as i64 + local_offset_secs(epoch))
+}
+/// Seconds east of UTC on the local clock at `epoch` (DST-aware); 0 when the OS cannot say.
+pub fn local_offset_secs(epoch: u64) -> i64 {
+    #[cfg(unix)]
+    {
+        let t = epoch as libc::time_t;
+        let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
+        if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
+            return 0;
+        }
+        tm.tm_gmtoff as i64
+    }
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        #[derive(Default)]
+        struct SystemTime {
+            parts: [u16; 8],
+        }
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn FileTimeToSystemTime(file: *const u64, out: *mut SystemTime) -> i32;
+            fn SystemTimeToTzSpecificLocalTime(
+                zone: *const std::ffi::c_void,
+                utc: *const SystemTime,
+                local: *mut SystemTime,
+            ) -> i32;
+            fn SystemTimeToFileTime(time: *const SystemTime, out: *mut u64) -> i32;
+        }
+        let utc_ft: u64 = epoch * 10_000_000 + 116_444_736_000_000_000;
+        let mut utc = SystemTime::default();
+        let mut local = SystemTime::default();
+        let mut local_ft = 0u64;
+        unsafe {
+            if FileTimeToSystemTime(&utc_ft, &mut utc) == 0
+                || SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut local) == 0
+                || SystemTimeToFileTime(&local, &mut local_ft) == 0
+            {
+                return 0;
+            }
+        }
+        (local_ft as i64 - utc_ft as i64) / 10_000_000
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = epoch;
+        0
+    }
+}
+/// Proleptic Gregorian date of a (possibly offset) Unix second count.
+pub fn civil_date(seconds: i64) -> String {
+    let z = seconds.div_euclid(86400) + 719468;
+    let era = z.div_euclid(146097);
     let doe = z - era * 146097;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
     let mut y = yoe + era * 400;
@@ -147,8 +201,20 @@ mod tests {
         assert_eq!(s.used(), Some(30));
         assert_eq!(s.total, Some(100));
         assert_eq!(s.nodes, 1);
-        assert_eq!(date(1893456000), "2030-01-01");
+        assert_eq!(civil_date(1893456000), "2030-01-01");
         assert!(!safe_web_url("file:///tmp/profile"));
         assert!(!safe_web_url("https://u:p@example.invalid"));
+    }
+    #[test]
+    fn today_rolls_on_the_local_clock_not_utc() {
+        // 2026-11-07 16:30 UTC is 2026-11-08 00:30 in China (UTC+8).
+        let epoch = 1_794_069_000;
+        assert_eq!(civil_date(epoch), "2026-11-07");
+        assert_eq!(civil_date(epoch + 8 * 3600), "2026-11-08");
+        assert_eq!(civil_date(epoch - 17 * 3600), "2026-11-06");
+        // `date` applies the machine's own offset: the result is UTC date shifted by it.
+        let off = local_offset_secs(epoch as u64);
+        assert!(off.abs() <= 14 * 3600);
+        assert_eq!(date(epoch as u64), civil_date(epoch + off));
     }
 }

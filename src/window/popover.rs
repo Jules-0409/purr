@@ -129,13 +129,25 @@ pub(super) fn apply_tray(ui: &TrayWindow, state: &LiveState) {
         }
         .into(),
     );
+    // Same numbers and units as the main window: decimal MB, "—" until measured.
+    let memory = if state.memory_shell > 0 && state.memory_core > 0 {
+        format!(
+            "{:.0}",
+            (state.memory_shell + state.memory_core) as f64 / present::MB
+        )
+    } else {
+        "—".to_string()
+    };
+    let today = if state.stats_live {
+        present::size_text(state.telemetry.down.saturating_add(state.telemetry.up))
+    } else {
+        "—".to_string()
+    };
     ui.set_metrics(
         format!(
-            "↓ {}  ↑ {} · 内存 {:.0} MB · 今日 {}",
+            "↓ {}  ↑ {} · 内存 {memory} MB · 今日 {today}",
             speed(state, state.down_bps),
             speed(state, state.up_bps),
-            (state.memory_shell + state.memory_core) as f64 / 1_048_576.0,
-            present::size_text(state.telemetry.down + state.telemetry.up)
         )
         .into(),
     );
@@ -146,17 +158,17 @@ pub(super) fn apply_tray(ui: &TrayWindow, state: &LiveState) {
     ui.set_countdown(countdown(state).into());
     ui.set_down(speed(state, state.down_bps).into());
     ui.set_up(speed(state, state.up_bps).into());
-    ui.set_memory(
-        format!(
-            "{:.0}",
-            (state.memory_shell + state.memory_core) as f64 / 1_048_576.0
-        )
-        .into(),
-    );
-    let total = present::size_text(state.telemetry.down.saturating_add(state.telemetry.up));
-    let (number, unit) = total.split_once(' ').unwrap_or(("0", "B"));
+    ui.set_memory(memory.into());
+    let (number, unit) = today.split_once(' ').unwrap_or((today.as_str(), ""));
     ui.set_total(number.into());
     ui.set_unit(unit.into());
+    // Section header: the real name of the group these members belong to.
+    ui.set_group_label(
+        main_group(state)
+            .map(|g| g.label.as_str())
+            .unwrap_or("")
+            .into(),
+    );
     ui.set_nodes(ModelRc::new(VecModel::from(tray_nodes(state))));
 }
 pub fn toggle(x: i32, y: i32) {
