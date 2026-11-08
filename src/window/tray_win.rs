@@ -225,6 +225,7 @@ pub fn cursor() -> (i32, i32) {
 }
 
 /// Pure placement: returns (left, top, upward).
+#[allow(clippy::too_many_arguments)]
 pub fn place_in(
     pt: (i32, i32),
     width: i32,

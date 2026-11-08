@@ -62,7 +62,7 @@ thread_local! {
     static TRAY_WINDOW: RefCell<Option<TrayWindow>> = const { RefCell::new(None) };
     static TRAY_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     static PAGE_STARTED: Cell<Instant> = Cell::new(Instant::now());
-    static ASCII_KEY: RefCell<String> = RefCell::new(String::new());
+    static ASCII_KEY: RefCell<String> = const { RefCell::new(String::new()) };
     static SHAKE_STARTED: Cell<Instant> = Cell::new(Instant::now());
     static AUTO_TESTED: RefCell<HashMap<String, Instant>> = RefCell::new(HashMap::new());
     static SETTING_REVISION: Cell<u64> = const { Cell::new(0) };
@@ -593,8 +593,11 @@ pub fn open() {
                                 std::mem::size_of::<u32>() as u32,
                             );
                             let hinst = GetModuleHandleW(std::ptr::null());
-                            let hicon_big = LoadImageW(hinst, 1 as *const u16, 1, 64, 64, 0);
-                            let hicon_small = LoadImageW(hinst, 1 as *const u16, 1, 16, 16, 0);
+                            // MAKEINTRESOURCEW(1): resource id 1, not a real pointer.
+                            #[allow(clippy::manual_dangling_ptr)]
+                            let icon_id = 1 as *const u16;
+                            let hicon_big = LoadImageW(hinst, icon_id, 1, 64, 64, 0);
+                            let hicon_small = LoadImageW(hinst, icon_id, 1, 16, 16, 0);
                             if hicon_big != 0 {
                                 SendMessageW(hwnd, 0x0080, 1, hicon_big); // WM_SETICON, ICON_BIG
                             }
@@ -780,7 +783,7 @@ fn start_motion() {
                 if !ui.window().is_visible() {
                     return;
                 }
-                let (down, flow, history) = LIVE
+                let (down, _flow, history) = LIVE
                     .with(|slot| {
                         slot.borrow().as_ref().map(|live| {
                             let guard = live.lock().expect("live lock");
@@ -1065,6 +1068,7 @@ fn fit_to_work_area(ui: &MainWindow) {
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     #[repr(C)]
     #[derive(Copy, Clone, Default)]
+    #[allow(clippy::upper_case_acronyms)]
     struct RECT {
         left: i32,
         top: i32,
@@ -1073,6 +1077,7 @@ fn fit_to_work_area(ui: &MainWindow) {
     }
     #[repr(C)]
     #[derive(Copy, Clone, Default)]
+    #[allow(clippy::upper_case_acronyms)]
     struct MONITORINFO {
         cb_size: u32,
         rc_monitor: RECT,
@@ -1178,6 +1183,7 @@ fn apply_frame_shape(ui: &MainWindow) {
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     #[repr(C)]
     #[derive(Default)]
+    #[allow(clippy::upper_case_acronyms)]
     struct RECT {
         left: i32,
         top: i32,

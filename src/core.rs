@@ -18,6 +18,7 @@ fn set_pid(slot: &AtomicU32, value: u32) {
     RUNNING_PID.store(value, Ordering::SeqCst);
 }
 
+#[allow(dead_code)]
 pub fn running_pid() -> u32 {
     RUNNING_PID.load(Ordering::SeqCst)
 }

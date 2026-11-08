@@ -446,7 +446,6 @@ fn position_tray_window(ui: &TrayWindow, x: i32, y: i32, fallback_logical_h: f32
             if focus {
                 w.focus_window();
             }
-            return;
         }
         #[cfg(not(windows))]
         {

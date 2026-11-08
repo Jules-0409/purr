@@ -384,7 +384,7 @@ pub async fn serve(
         tokio::select! {
             _ = ticker.tick() => {
                 trim_ticks = trim_ticks.wrapping_add(1);
-                if trim_ticks <= 2 || trim_ticks % 10 == 0 {
+                if trim_ticks <= 2 || trim_ticks.is_multiple_of(10) {
                     crate::status::release_unused_memory();
                 }
                 let shell=crate::status::footprint_bytes(std::process::id()).unwrap_or(0);
