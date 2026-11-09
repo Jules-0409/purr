@@ -695,6 +695,9 @@ fn tun_payload() -> serde_json::Value {
             "stack": "system",
             "auto-route": true,
             "auto-detect-interface": true,
+            // Windows sends DNS out of every adapter; without this, queries to the
+            // WLAN resolver skip the tunnel.
+            "strict-route": true,
             "dns-hijack": ["any:53"]
         }
     })

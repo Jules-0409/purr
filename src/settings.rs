@@ -128,7 +128,58 @@ impl Preferences {
         ] {
             text = set_yaml_key(&text, key, &value);
         }
-        text
+        drop_plain_nameservers(&text)
+    }
+}
+
+/// `dns.nameserver` entries all race for every lookup, so a plain UDP resolver listed
+/// beside a DoH one answers foreign names too and shows up on DNS leak tests. Keep the
+/// encrypted ones (CN names still go through nameserver-policy). Lists with no DoH
+/// entry are left alone so resolution never ends up empty.
+pub fn drop_plain_nameservers(text: &str) -> String {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < lines.len() {
+        out.push_str(lines[i]);
+        if lines[i].trim_end() == "  nameserver:" {
+            let mut j = i + 1;
+            while j < lines.len() && lines[j].starts_with("  - ") {
+                j += 1;
+            }
+            let items = &lines[i + 1..j];
+            let encrypted = |l: &str| {
+                let v = l.trim_start_matches("  - ").trim().trim_matches(|c| c == '\'' || c == '"');
+                v.contains("://")
+            };
+            let has_doh = items.iter().any(|l| encrypted(l));
+            for l in items {
+                if !has_doh || encrypted(l) {
+                    out.push_str(l);
+                }
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+#[cfg(test)]
+mod nameserver_tests {
+    use super::drop_plain_nameservers;
+    #[test]
+    fn drops_plain_beside_doh() {
+        let t = "dns:\n  nameserver:\n  - https://cloudflare-dns.com/dns-query\n  - 223.5.5.5\n  nameserver-policy:\n    geosite:cn:\n    - 223.5.5.5\n";
+        let o = drop_plain_nameservers(t);
+        assert!(o.contains("  - https://cloudflare-dns.com/dns-query\n  nameserver-policy:"));
+        assert!(o.contains("    - 223.5.5.5\n"));
+    }
+    #[test]
+    fn keeps_plain_only_list() {
+        let t = "dns:\n  nameserver:\n  - 223.5.5.5\n";
+        assert_eq!(drop_plain_nameservers(t), t);
     }
 }
 /// Version of the first-launch notice; bump it to ask everyone to read a changed text again.

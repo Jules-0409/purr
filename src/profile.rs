@@ -41,11 +41,19 @@ fn yaml_setting(text: &str, prefs: &Preferences, key: &str) -> Result<String, St
             "223.5.5.5" => "https://dns.alidns.com/dns-query",
             _ => "https://cloudflare-dns.com/dns-query",
         };
+        let fallback = if endpoint.contains("dns.google") {
+            "https://cloudflare-dns.com/dns-query"
+        } else {
+            "https://dns.google/dns-query"
+        };
         dns.insert(
             Value::String("nameserver".into()),
+            // Every nameserver runs for every lookup, so a plain domestic resolver here
+            // answers foreign names too and shows up on leak tests. Pair the pick with a
+            // second foreign DoH instead; CN names keep nameserver-policy.
             Value::Sequence(vec![
                 Value::String(endpoint.into()),
-                Value::String("223.5.5.5".into()),
+                Value::String(fallback.into()),
             ]),
         );
     } else {
