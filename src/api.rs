@@ -1,3 +1,4 @@
+use serde_json::Value;
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::time::Duration;
@@ -103,6 +104,16 @@ impl Api {
     pub async fn patch_configs(&self, value: serde_json::Value) -> Result<(), String> {
         self.send_json(self.http.patch(format!("{}/configs", self.base)), value)
             .await
+    }
+    /// What the running core reports for `tun.enable`: a PATCH can be accepted while the adapter
+    /// never comes up, and a reload or restart drops a TUN that was only patched in.
+    pub async fn tun_enabled(&self) -> Result<bool, String> {
+        let value = self.get_json("/configs").await?;
+        Ok(value
+            .get("tun")
+            .and_then(|t| t.get("enable"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false))
     }
     pub async fn reload_path(&self, path: &std::path::Path) -> Result<(), String> {
         self.send_json(

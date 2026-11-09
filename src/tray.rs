@@ -379,6 +379,8 @@ pub async fn serve(
     });
     let mut ticker = tokio::time::interval(Duration::from_secs(2));
     let mut trim_ticks = 0u32;
+    // One warning per loss of TUN, not one every check.
+    let mut tun_warned = false;
     let mut cpu_meter = crate::status::CpuMeter::default();
     let (mut terminate, mut interrupt) = exit_signals();
     loop {
@@ -401,6 +403,9 @@ pub async fn serve(
                 }
                 crate::window::set_memory(&live, label);
                 refresh(&api, &shared, &live).await;
+                if trim_ticks.is_multiple_of(5) {
+                    keep_tun(&api, &live, &mut tun_warned).await;
+                }
             }
             command = commands.recv() => {
                 match command {
@@ -484,25 +489,29 @@ pub async fn serve(
                                 continue;
                             }
                         }
-                        let payload = if !on {
-                            serde_json::json!({
-                                "tun": {
-                                    "enable": true,
-                                    "stack": "system",
-                                    "auto-route": true,
-                                    "auto-detect-interface": true,
-                                    "dns-hijack": ["any:53"]
+                        if !on {
+                            match api.patch_configs(tun_payload()).await {
+                                Ok(()) if tun_confirmed(&api).await => {
+                                    crate::window::set_awake(&live,true);
+                                    remember_tun(&live,true);
+                                    tun_warned=false;
+                                    let mut guard=live.lock().expect("live lock");guard.tun=true;guard.last_error.clear();guard.bump();
                                 }
-                            })
-                        } else {
-                            serde_json::json!({"tun": {"enable": false}})
-                        };
-                        match api.patch_configs(payload).await {
-                            Ok(())=>{
-                                crate::window::set_awake(&live,true);
-                                let mut guard=live.lock().expect("live lock");guard.tun = !on;guard.last_error.clear();guard.bump();
+                                Ok(()) => {
+                                    remember_tun(&live,false);
+                                    {let mut guard=live.lock().expect("live lock");guard.tun=false;guard.bump();}
+                                    report_error(&live,"虚拟网卡没开起来：内核没有建立 TUN 网卡，请检查管理员权限和 wintun 驱动".into());
+                                }
+                                Err(_)=>report_error(&live,"TUN 启用失败，请检查管理员权限和内核支持".into()),
                             }
-                            Err(_)=>report_error(&live,"TUN 启用失败，请检查管理员权限和内核支持".into()),
+                        } else {
+                            match api.patch_configs(serde_json::json!({"tun": {"enable": false}})).await {
+                                Ok(())=>{
+                                    remember_tun(&live,false);
+                                    let mut guard=live.lock().expect("live lock");guard.tun=false;guard.last_error.clear();guard.bump();
+                                }
+                                Err(_)=>report_error(&live,"虚拟网卡关闭失败，请稍后再试".into()),
+                            }
                         }
                     }
                     Some(MenuCommand::UpdateSetting{key,value,revision}) => {
@@ -679,6 +688,107 @@ async fn toggle_run(live: &Mutex<crate::window::LiveState>, api: &Api) -> Result
     crate::window::set_place(live, "查找中".to_string());
     Ok(())
 }
+fn tun_payload() -> serde_json::Value {
+    serde_json::json!({
+        "tun": {
+            "enable": true,
+            "stack": "system",
+            "auto-route": true,
+            "auto-detect-interface": true,
+            "dns-hijack": ["any:53"]
+        }
+    })
+}
+
+/// The core accepts the PATCH before the adapter exists; read it back for up to 2 s.
+async fn tun_confirmed(api: &Api) -> bool {
+    for _ in 0..8 {
+        if api.tun_enabled().await.unwrap_or(false) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    false
+}
+
+fn remember_tun(live: &Mutex<crate::window::LiveState>, on: bool) {
+    let mut guard = live.lock().expect("live lock");
+    if guard.preferences.tun == on {
+        return;
+    }
+    guard.preferences.tun = on;
+    match crate::config::app_config_dir() {
+        Ok(dir) => {
+            if let Err(e) = guard.preferences.save(&dir) {
+                eprintln!("purr: tun preference not saved: {e}");
+            }
+        }
+        Err(e) => eprintln!("purr: tun preference not saved: {e}"),
+    }
+}
+
+fn can_enable_tun() -> bool {
+    #[cfg(windows)]
+    {
+        is_windows_admin()
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
+}
+
+/// Keeps the TUN switch honest: the UI shows what the core actually runs, and a TUN the user
+/// turned on comes back after a subscription update, a reload or a core restart dropped it.
+async fn keep_tun(api: &Api, live: &Mutex<crate::window::LiveState>, warned: &mut bool) {
+    let (awake, want, shown) = {
+        let guard = live.lock().expect("live lock");
+        (guard.awake, guard.preferences.tun, guard.tun)
+    };
+    let Ok(actual) = api.tun_enabled().await else {
+        return;
+    };
+    if actual {
+        *warned = false;
+        if !shown {
+            let mut guard = live.lock().expect("live lock");
+            guard.tun = true;
+            guard.bump();
+        }
+        return;
+    }
+    if shown {
+        let mut guard = live.lock().expect("live lock");
+        guard.tun = false;
+        guard.bump();
+    }
+    if !(awake && want) {
+        return;
+    }
+    if can_enable_tun()
+        && api.patch_configs(tun_payload()).await.is_ok()
+        && tun_confirmed(api).await
+    {
+        *warned = false;
+        {
+            let mut guard = live.lock().expect("live lock");
+            guard.tun = true;
+            guard.bump();
+        }
+        notice(live, "虚拟网卡已重新打开");
+        return;
+    }
+    if !*warned {
+        *warned = true;
+        let message = if can_enable_tun() {
+            "虚拟网卡掉了，自动重开失败，请检查 wintun 驱动"
+        } else {
+            "虚拟网卡掉了：需要管理员权限，点「虚拟网卡」重新开启"
+        };
+        report_error(live, message.into());
+    }
+}
+
 fn report_error(live: &Mutex<crate::window::LiveState>, message: String) {
     let mut state = live.lock().expect("live lock");
     state.last_error = message.clone();

@@ -10,6 +10,8 @@ pub struct Preferences {
     pub block_ads: bool,
     pub close_to_tray: bool,
     pub system_proxy: bool,
+    /// Whether the user wants TUN on. Kept so a core restart or reload can bring it back.
+    pub tun: bool,
     pub mixed_port: u16,
     pub allow_lan: bool,
     pub ipv6: bool,
@@ -54,6 +56,7 @@ impl Default for Preferences {
             block_ads: true,
             close_to_tray: true,
             system_proxy: true,
+            tun: false,
             mixed_port: crate::config::MIXED_PORT,
             allow_lan: false,
             ipv6: true,
