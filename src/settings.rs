@@ -149,7 +149,10 @@ pub fn drop_plain_nameservers(text: &str) -> String {
             }
             let items = &lines[i + 1..j];
             let encrypted = |l: &str| {
-                let v = l.trim_start_matches("  - ").trim().trim_matches(|c| c == '\'' || c == '"');
+                let v = l
+                    .trim_start_matches("  - ")
+                    .trim()
+                    .trim_matches(|c| c == '\'' || c == '"');
                 v.contains("://")
             };
             let has_doh = items.iter().any(|l| encrypted(l));
